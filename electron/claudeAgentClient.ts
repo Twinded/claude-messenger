@@ -171,7 +171,7 @@ export function createClaudeAgentClient(
     const merged: ClaudeRuntimeOptions = normalizeClaudeOptions({
       ...defaultClaudeOptions,
       ...options.defaults,
-      model: init.contact.model ?? options.defaults?.model ?? defaultClaudeOptions.model,
+      model: (init.contact.model ?? options.defaults?.model ?? defaultClaudeOptions.model) as ClaudeRuntimeOptions["model"],
       systemPrompt: init.contact.systemPrompt,
       cwd: init.cwd ?? init.contact.workingDirectory,
       permissionMode: init.permissionMode ?? defaultClaudeOptions.permissionMode,

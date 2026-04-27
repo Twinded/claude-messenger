@@ -15,13 +15,11 @@ import type {
   ThreadId
 } from "../shared/types.js";
 
-declare global {
-  interface Window {
-    claudeMsn: {
-      on(channel: string, listener: (payload: StreamEvent) => void): () => void;
-    };
-  }
-}
+// Window.claudeMsn is declared by the preload script in electron/preload.ts.
+type ClaudeMsnApi = {
+  on(channel: string, listener: (payload: StreamEvent) => void): () => void;
+};
+const claudeMsn = (window as unknown as { claudeMsn: ClaudeMsnApi }).claudeMsn;
 
 export interface PermissionPrompt {
   requestId: string;
@@ -85,7 +83,7 @@ export function useClaudeEvents(threadId: ThreadId | null): {
     };
 
     for (const channel of STREAM_CHANNELS) {
-      const off = window.claudeMsn.on(channel, (event) => {
+      const off = claudeMsn.on(channel, (event) => {
         if (!matchesThread(event)) return;
         setState((prev) => reduce(prev, event));
       });

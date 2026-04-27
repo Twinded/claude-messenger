@@ -20,7 +20,7 @@
     "clean": "rm -rf dist dist-electron release",
     "electron:dev": "node scripts/dev-electron.mjs",
     "electron:start": "npm run build && electron .",
-    "test": "node --test tests/*.test.mts",
+    "test": "node --import tsx --test tests/*.test.mts",
     "audit:security": "npm audit --audit-level=moderate"
   },
   "dependencies": {
@@ -41,6 +41,7 @@
     "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "playwright": "^1.59.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.6.0",
     "vite": "^7.1.12"
   },

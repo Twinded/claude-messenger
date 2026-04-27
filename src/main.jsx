@@ -12,6 +12,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import "./styles.css";
+import "./styles-claude-messenger.css";
 import { ClaudeConfigurationDialog } from "./claudeConfigurationDialog.jsx";
 import { useClaudeEvents } from "./useClaudeEvents.js";
 

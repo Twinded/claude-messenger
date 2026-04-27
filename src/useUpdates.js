@@ -26,7 +26,7 @@ export function useUpdates({ api, appVersion = "", userAgent = "", initialCheck 
       const failed = {
         checkedAt: new Date().toISOString(),
         front: { currentVersion: appVersion, latestVersion: "", updateAvailable: false, error: error.message },
-        codex: { currentVersion: userAgent, latestVersion: "", updateAvailable: false, error: error.message }
+        app: { currentVersion: userAgent, latestVersion: "", updateAvailable: false, error: error.message }
       };
       setUpdateState(failed);
       if (showDialog) setUpdateDialogOpen(true);
@@ -48,9 +48,9 @@ export function useUpdates({ api, appVersion = "", userAgent = "", initialCheck 
       target,
       phase: "starting",
       indeterminate: true,
-      message: target === "codex" ? "Preparation de la mise a jour Codex app-server..." : "Preparation du telechargement..."
+      message: target === "app" ? "Preparation de la mise a jour Claude Agent SDK..." : "Preparation du telechargement..."
     });
-    setUpdateActionMessage(target === "codex" ? "Mise a jour Codex app-server en cours..." : "Telechargement de la mise a jour Codex Messenger...");
+    setUpdateActionMessage(target === "app" ? "Mise a jour Claude Agent SDK en cours..." : "Telechargement de la mise a jour Claude Messenger...");
     try {
       const result = await api.installUpdateTarget(target);
       setUpdateActionMessage(result?.message || "Mise a jour terminee.");
@@ -81,11 +81,11 @@ export function useUpdates({ api, appVersion = "", userAgent = "", initialCheck 
     }
   }
 
-  async function restartForUpdate(target = updateProgress?.target || "codex") {
-    const cleanTarget = target === "front" ? "front" : "codex";
+  async function restartForUpdate(target = updateProgress?.target || "app") {
+    const cleanTarget = target === "front" ? "front" : "app";
     const message = cleanTarget === "front"
-      ? "Installation de la mise a jour Codex Messenger..."
-      : "Redemarrage de Codex Messenger...";
+      ? "Installation de la mise a jour Claude Messenger..."
+      : "Redemarrage de Claude Messenger...";
     setInstallingUpdateTarget(cleanTarget);
     setUpdateActionMessage(message);
     setUpdateProgress((current) => ({

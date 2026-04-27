@@ -1,0 +1,348 @@
+/*
+ * Layout-only styles for the new Claude Messenger renderer entry. The
+ * vendored XP/MSN look-and-feel from styles.css is used for legacy widgets
+ * that will be progressively rewired; this file only adds the structural
+ * scaffolding (roster, conversation pane, settings dialog) used by the
+ * new minimal main.jsx until those widgets come back online.
+ */
+
+.app-root {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100vh;
+  font-family: "Segoe UI", "Tahoma", system-ui, sans-serif;
+  background: linear-gradient(180deg, #d6e7ff 0%, #f4f9ff 100%);
+}
+
+.boot-screen {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #19457e;
+}
+
+.roster {
+  display: flex;
+  flex-direction: column;
+  background: #f9fcff;
+  border-right: 1px solid #c9d9ec;
+  overflow-y: auto;
+}
+
+.roster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #4179c5 0%, #1c4e94 100%);
+  color: white;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.roster-header button {
+  background: transparent;
+  border: 0;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.roster-groups,
+.roster-groups ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.roster-groups > li {
+  border-bottom: 1px solid #e3ecf6;
+}
+
+.roster-groups h4 {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #4a72a6;
+  background: #e8f0fb;
+}
+
+.roster-contact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #1f2d3d;
+}
+
+.roster-contact:hover {
+  background: #e8f1fc;
+}
+
+.roster-contact.active {
+  background: #c8defc;
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+}
+
+.status-dot.status-online {
+  background: #2bb673;
+}
+.status-dot.status-busy {
+  background: #d9534f;
+}
+.status-dot.status-away {
+  background: #f0ad4e;
+}
+.status-dot.status-streaming {
+  background: #4f8df3;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.contact-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unread {
+  background: #d9534f;
+  color: white;
+  font-size: 11px;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+}
+
+.empty-state,
+.conversation-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: white;
+}
+
+.empty-state {
+  align-items: center;
+  justify-content: center;
+  color: #5a708a;
+}
+
+.conversation-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #5a92d5 0%, #3a73b4 100%);
+  color: white;
+  border-bottom: 1px solid #2c5d99;
+}
+
+.conversation-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.conversation-model {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.conversation-loading {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: #5a708a;
+}
+
+.messages {
+  list-style: none;
+  flex: 1;
+  margin: 0;
+  padding: 16px 18px;
+  overflow-y: auto;
+  background: #f6faff;
+}
+
+.message {
+  display: block;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  max-width: 80%;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.message-user {
+  background: #cfe1fb;
+  margin-left: auto;
+  text-align: right;
+}
+
+.message-assistant {
+  background: white;
+  border: 1px solid #d8e3f1;
+}
+
+.message-assistant.streaming {
+  border-color: #4f8df3;
+}
+
+.message-thinking em {
+  color: #6b7d96;
+  font-style: italic;
+}
+
+.message-error {
+  background: #fdecea;
+  color: #a02622;
+  border: 1px solid #f4b9b6;
+}
+
+.tool-result {
+  background: #f0f3f7;
+  border-radius: 4px;
+  padding: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  background: white;
+  border-top: 1px solid #d8e3f1;
+}
+
+.composer textarea {
+  flex: 1;
+  resize: vertical;
+  border: 1px solid #c1d3eb;
+  border-radius: 4px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.composer button {
+  padding: 0 18px;
+  background: linear-gradient(180deg, #4f8df3 0%, #2f6dd1 100%);
+  color: white;
+  border: 1px solid #1b4f99;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.composer button:disabled {
+  background: #a9bcd6;
+  cursor: not-allowed;
+}
+
+/* ── Settings dialog ──────────────────────────────────────────────── */
+
+.claude-config-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 28px;
+  max-width: 520px;
+  margin: 24px auto;
+  background: white;
+  border: 1px solid #c1d3eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(15, 35, 70, 0.12);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.claude-config-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #19457e;
+}
+
+.claude-config-dialog h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #4a72a6;
+}
+
+.claude-config-dialog section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #e3ecf6;
+  padding-top: 12px;
+}
+
+.claude-config-dialog .muted {
+  color: #6b7d96;
+  font-size: 12px;
+  margin: 0;
+}
+
+.claude-config-dialog button {
+  align-self: flex-start;
+  padding: 6px 14px;
+  background: linear-gradient(180deg, #4f8df3 0%, #2f6dd1 100%);
+  color: white;
+  border: 1px solid #1b4f99;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.claude-config-dialog button.danger {
+  background: linear-gradient(180deg, #e07060 0%, #b94434 100%);
+  border-color: #8b2e22;
+}
+
+.claude-config-dialog .api-key-row {
+  display: grid;
+  gap: 6px;
+}
+
+.claude-config-dialog input[type="password"],
+.claude-config-dialog select {
+  padding: 6px 8px;
+  border: 1px solid #c1d3eb;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.claude-config-dialog .error {
+  color: #a02622;
+  font-size: 13px;
+  margin: 0;
+}
+
+.claude-config-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #e3ecf6;
+  padding-top: 12px;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+}

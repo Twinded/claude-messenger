@@ -13,6 +13,25 @@
     "sourceMap": true,
     "allowJs": false
   },
-  "include": ["electron", "shared/types.ts", "shared/threadSelection.js", "shared/versionUtils.js", "shared/languages.js"],
-  "exclude": ["node_modules", "dist", "release", "vendor", "src", "tests"]
+  "include": [
+    "electron/agentsWatcher.ts",
+    "electron/authBridge.ts",
+    "electron/claudeAgentClient.ts",
+    "electron/contactRegistry.ts",
+    "electron/ipcHandlers.ts",
+    "electron/main.ts",
+    "electron/mcpConfigLoader.ts",
+    "electron/security.ts",
+    "electron/settingsStore.ts",
+    "electron/skillsWatcher.ts",
+    "electron/threadStore.ts",
+    "electron/windowManager.ts",
+    "shared/types.ts",
+    "shared/claudeImages.ts",
+    "shared/claudeOptions.ts",
+    "shared/threadSelection.js",
+    "shared/versionUtils.js",
+    "shared/languages.js"
+  ],
+  "exclude": ["node_modules", "dist", "release", "vendor", "src", "tests", "electron/preload.ts"]
 }
