@@ -164,6 +164,7 @@ async function createMainWindow(
   });
   setStableWindowTitle(win, "Claude Messenger");
   await win.loadURL(rendererEntryUrl());
+  if (isDev) win.webContents.openDevTools({ mode: "detach" });
   return win;
 }
 
