@@ -80,6 +80,12 @@ async function loadCustomAgents(): Promise<CustomAgentRecord[]> {
   }
 }
 
+async function saveCustomAgents(agents: CustomAgentRecord[]): Promise<void> {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(path.dirname(customAgentsFilePath()), { recursive: true });
+  await fs.writeFile(customAgentsFilePath(), JSON.stringify(agents, null, 2), "utf8");
+}
+
 async function bootstrap(): Promise<void> {
   await app.whenReady();
 
@@ -146,6 +152,8 @@ async function bootstrap(): Promise<void> {
     windows,
     createBaseWindow,
     rendererEntryUrl,
+    loadCustomAgents,
+    saveCustomAgents,
     logDebug
   });
 

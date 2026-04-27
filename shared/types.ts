@@ -115,6 +115,7 @@ export interface AppSettings {
   authMode: "oauth-claude" | "api-key" | "unset";
   apiKeyStored: boolean;
   profilePicturePath?: string;
+  profileStatusMessage?: string;
   windowZoomFactor: number;
 }
 

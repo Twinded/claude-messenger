@@ -24,6 +24,7 @@ const settingsSchema = z.object({
   authMode: z.enum(["oauth-claude", "api-key", "unset"]).default("unset"),
   apiKeyStored: z.boolean().default(false),
   profilePicturePath: z.string().optional(),
+  profileStatusMessage: z.string().optional(),
   windowZoomFactor: z.number().positive().max(3).default(1)
 });
 

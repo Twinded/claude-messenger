@@ -63,6 +63,138 @@
 .contact-mini-avatar .avatar.status-away::after { background: #f0ad4e; }
 .contact-mini-avatar .avatar.status-streaming::after { background: #4f8df3; }
 
+/* Standalone chat window — fills 100% (no roster on the side). */
+.msn-window.chat.standalone {
+  height: 100vh;
+}
+
+/* Emoticon picker grid in composer */
+.composer-popup.emoticon-popup {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.composer-popup.emoticon-popup button {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+}
+
+.composer-popup.emoticon-popup button:hover {
+  background: #e8f1fc;
+  border-color: #c1d3eb;
+}
+
+.composer-popup.emoticon-popup img {
+  width: 19px;
+  height: 19px;
+  display: block;
+}
+
+/* Composer attachments preview row */
+.composer-attachments {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #e3ecf6;
+  flex-wrap: wrap;
+}
+
+.composer-attachments button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: #f4f8fd;
+  border: 1px solid #c1d3eb;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.composer-attachments img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+/* Recent threads side panel */
+.thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-list li {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #f6f9fd;
+  border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thread-list li.active {
+  background: #d6e6fb;
+  border-color: #4f8df3;
+}
+
+.thread-list li strong {
+  font-size: 12px;
+  color: #1c4e94;
+}
+
+.thread-list li small {
+  color: #6b7d96;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Format strip extra buttons */
+.format-strip {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px;
+  align-items: center;
+}
+
+.format-strip button {
+  background: linear-gradient(180deg, #f7faff 0%, #d8e6fa 100%);
+  border: 1px solid #a9c2e3;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.format-strip button[type="submit"] {
+  margin-left: auto;
+  background: linear-gradient(180deg, #4f8df3 0%, #2f6dd1 100%);
+  color: white;
+  border-color: #1b4f99;
+  font-weight: 600;
+}
+
+.format-strip button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .boot-screen {
   display: grid;
   place-items: center;

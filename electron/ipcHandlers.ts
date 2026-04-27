@@ -7,8 +7,10 @@
  * registry, the thread store, and the auth bridge wired up in main.ts.
  */
 
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import {
   IPC_CHANNELS,
@@ -28,7 +30,7 @@ import {
 import { isSafeExternalUrl } from "./security.js";
 import type { AuthBridge } from "./authBridge.js";
 import type { ClaudeAgentClient } from "./claudeAgentClient.js";
-import type { ContactRegistry } from "./contactRegistry.js";
+import type { ContactRegistry, CustomAgentRecord } from "./contactRegistry.js";
 import type { SettingsStore } from "./settingsStore.js";
 import type { ThreadStore } from "./threadStore.js";
 import { SUPPORTED_MODELS } from "../shared/claudeOptions.js";
@@ -42,6 +44,8 @@ interface RegisterIpcHandlersOptions {
   windows: Map<string, BrowserWindow>;
   createBaseWindow: (key: string, opts: Electron.BrowserWindowConstructorOptions) => BrowserWindow;
   rendererEntryUrl: () => string;
+  loadCustomAgents: () => Promise<CustomAgentRecord[]>;
+  saveCustomAgents: (agents: CustomAgentRecord[]) => Promise<void>;
   logDebug: (event: string, details?: Record<string, unknown>) => void;
 }
 
@@ -90,6 +94,8 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
     windows,
     createBaseWindow,
     rendererEntryUrl,
+    loadCustomAgents,
+    saveCustomAgents,
     logDebug
   } = options;
 
@@ -216,9 +222,31 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
   // ── Contacts ──────────────────────────────────────────────────────────
   safeHandle<void, Contact[]>(IPC_CHANNELS.contactsList, async () => contactRegistry.list(), logDebug);
 
-  safeHandle<CreateAgentPayload, NotImplementedResult>(
+  safeHandle<CreateAgentPayload, { ok: boolean; id?: string; message?: string }>(
     IPC_CHANNELS.contactsCreate,
-    async () => notImplemented(IPC_CHANNELS.contactsCreate),
+    async (_event, payload) => {
+      if (!payload?.displayName || !payload?.systemPrompt) {
+        return { ok: false, message: "Nom et instructions requis." };
+      }
+      const id = `agent:custom:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const record: CustomAgentRecord = {
+        id,
+        displayName: payload.displayName,
+        group: payload.group || "Subagents",
+        iconKey: payload.iconKey || "robot",
+        ...(payload.color ? { color: payload.color } : {}),
+        systemPrompt: payload.systemPrompt,
+        ...(payload.model ? { model: payload.model } : {}),
+        ...(payload.workingDirectory ? { workingDirectory: payload.workingDirectory } : {})
+      };
+      const existing = await loadCustomAgents();
+      await saveCustomAgents([...existing, record]);
+      await contactRegistry.refresh();
+      for (const win of windows.values()) {
+        if (!win.isDestroyed()) win.webContents.send("conversation:notify", { kind: "contacts" });
+      }
+      return { ok: true, id };
+    },
     logDebug
   );
   safeHandle<{ contactId: string; displayName: string }, NotImplementedResult>(
@@ -389,6 +417,231 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
     logDebug
   );
 
+  // ── Media + profile + directory pickers ──────────────────────────────
+  safeHandle<{ extensions?: string[]; multi?: boolean } | undefined, { ok: boolean; file?: { path: string; name: string; dataUrl?: string } }>(
+    IPC_CHANNELS.mediaPickFile,
+    async (event, opts) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const filters = opts?.extensions
+        ? [{ name: "Files", extensions: opts.extensions }]
+        : [];
+      const result = win
+        ? await dialog.showOpenDialog(win, { properties: ["openFile"], filters })
+        : await dialog.showOpenDialog({ properties: ["openFile"], filters });
+      if (result.canceled || !result.filePaths[0]) return { ok: false };
+      const filePath = result.filePaths[0];
+      const name = path.basename(filePath);
+      let dataUrl: string | undefined;
+      try {
+        const buffer = await fs.readFile(filePath);
+        const ext = path.extname(filePath).toLowerCase().slice(1);
+        const mime =
+          ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+            : ext === "gif" ? "image/gif"
+            : ext === "webp" ? "image/webp"
+            : "image/png";
+        dataUrl = `data:${mime};base64,${buffer.toString("base64")}`;
+      } catch {
+        dataUrl = undefined;
+      }
+      return { ok: true, file: dataUrl ? { path: filePath, name, dataUrl } : { path: filePath, name } };
+    },
+    logDebug
+  );
+
+  safeHandle<{ dataUrl: string; suggestedName?: string }, { ok: boolean; path?: string }>(
+    IPC_CHANNELS.mediaSaveDataUrl,
+    async (event, payload) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = win
+        ? await dialog.showSaveDialog(win, { defaultPath: payload?.suggestedName ?? "image.png" })
+        : await dialog.showSaveDialog({ defaultPath: payload?.suggestedName ?? "image.png" });
+      if (result.canceled || !result.filePath) return { ok: false };
+      const match = (payload?.dataUrl ?? "").match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return { ok: false };
+      await fs.writeFile(result.filePath, Buffer.from(match[2] ?? "", "base64"));
+      return { ok: true, path: result.filePath };
+    },
+    logDebug
+  );
+
+  safeHandle<{ sourceDataUrl?: string } | undefined, { ok: boolean; path?: string }>(
+    IPC_CHANNELS.profileChoosePicture,
+    async (event, payload) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (payload?.sourceDataUrl) {
+        const userData = app.getPath("userData");
+        const profileDir = path.join(userData, "profile");
+        await fs.mkdir(profileDir, { recursive: true });
+        const match = payload.sourceDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) return { ok: false };
+        const ext = (match[1] ?? "image/png").split("/")[1] ?? "png";
+        const target = path.join(profileDir, `picture.${ext}`);
+        await fs.writeFile(target, Buffer.from(match[2] ?? "", "base64"));
+        await settings.patch({ profilePicturePath: target });
+        return { ok: true, path: target };
+      }
+      const result = win
+        ? await dialog.showOpenDialog(win, {
+            properties: ["openFile"],
+            filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }]
+          })
+        : await dialog.showOpenDialog({
+            properties: ["openFile"],
+            filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }]
+          });
+      if (result.canceled || !result.filePaths[0]) return { ok: false };
+      await settings.patch({ profilePicturePath: result.filePaths[0] });
+      return { ok: true, path: result.filePaths[0] };
+    },
+    logDebug
+  );
+
+  safeHandle<void, { ok: true }>(
+    IPC_CHANNELS.profileClearPicture,
+    async () => {
+      await settings.patch({ profilePicturePath: undefined });
+      return { ok: true };
+    },
+    logDebug
+  );
+
+  safeHandle<{ title?: string } | undefined, { ok: boolean; path?: string }>(
+    IPC_CHANNELS.appChooseDirectory,
+    async (event, opts) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const dialogOpts = {
+        properties: ["openDirectory" as const],
+        ...(opts?.title ? { title: opts.title } : {})
+      };
+      const result = win
+        ? await dialog.showOpenDialog(win, dialogOpts)
+        : await dialog.showOpenDialog(dialogOpts);
+      if (result.canceled || !result.filePaths[0]) return { ok: false };
+      return { ok: true, path: result.filePaths[0] };
+    },
+    logDebug
+  );
+
+  safeHandle<{ text: string; suggestedName?: string }, { ok: boolean; path?: string }>(
+    IPC_CHANNELS.appSaveText,
+    async (event, payload) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = win
+        ? await dialog.showSaveDialog(win, { defaultPath: payload?.suggestedName ?? "transcript.txt" })
+        : await dialog.showSaveDialog({ defaultPath: payload?.suggestedName ?? "transcript.txt" });
+      if (result.canceled || !result.filePath) return { ok: false };
+      await fs.writeFile(result.filePath, payload?.text ?? "", "utf8");
+      return { ok: true, path: result.filePath };
+    },
+    logDebug
+  );
+
+  // ── Updates ──────────────────────────────────────────────────────────
+  const releasesEndpoint = "https://api.github.com/repos/Twinded/claude-messenger/releases/latest";
+
+  function compareSemver(a: string, b: string): number {
+    const parse = (v: string) =>
+      v.replace(/^v/i, "").split(/[.\-+]/).map((x) => Number.parseInt(x, 10) || 0);
+    const aa = parse(a);
+    const bb = parse(b);
+    const len = Math.max(aa.length, bb.length);
+    for (let i = 0; i < len; i += 1) {
+      if ((aa[i] ?? 0) > (bb[i] ?? 0)) return 1;
+      if ((aa[i] ?? 0) < (bb[i] ?? 0)) return -1;
+    }
+    return 0;
+  }
+
+  safeHandle<{ force?: boolean } | undefined, {
+    checkedAt: string;
+    front: { currentVersion: string; latestVersion: string; updateAvailable: boolean; error?: string };
+    app: { currentVersion: string; latestVersion: string; updateAvailable: boolean; error?: string };
+  }>(
+    IPC_CHANNELS.updatesCheck,
+    async () => {
+      const checkedAt = new Date().toISOString();
+      const currentVersion = app.getVersion();
+      try {
+        const res = await fetch(releasesEndpoint, {
+          headers: { "User-Agent": `claude-messenger/${currentVersion}` }
+        });
+        if (!res.ok) {
+          return {
+            checkedAt,
+            front: { currentVersion, latestVersion: "", updateAvailable: false, error: `HTTP ${res.status}` },
+            app: { currentVersion: "claude-agent-sdk", latestVersion: "", updateAvailable: false }
+          };
+        }
+        const data = (await res.json()) as { tag_name?: string };
+        const latestVersion = (data.tag_name ?? "").replace(/^v/i, "");
+        return {
+          checkedAt,
+          front: {
+            currentVersion,
+            latestVersion,
+            updateAvailable: latestVersion ? compareSemver(latestVersion, currentVersion) > 0 : false
+          },
+          app: { currentVersion: "claude-agent-sdk", latestVersion: "", updateAvailable: false }
+        };
+      } catch (error) {
+        return {
+          checkedAt,
+          front: {
+            currentVersion,
+            latestVersion: "",
+            updateAvailable: false,
+            error: error instanceof Error ? error.message : String(error)
+          },
+          app: { currentVersion: "claude-agent-sdk", latestVersion: "", updateAvailable: false }
+        };
+      }
+    },
+    logDebug
+  );
+
+  safeHandle<string, { ok: boolean }>(
+    IPC_CHANNELS.updatesOpen,
+    async (_event, target) => {
+      const url = target === "front"
+        ? "https://github.com/Twinded/claude-messenger/releases/latest"
+        : "https://docs.anthropic.com/claude/docs/agents-and-tools/agent-sdk";
+      if (!isSafeExternalUrl(url)) return { ok: false };
+      await shell.openExternal(url);
+      return { ok: true };
+    },
+    logDebug
+  );
+
+  // Update install / restart are intentionally not auto-applied. We open
+  // the release page so the user installs from the official artifact.
+  safeHandle<string, { ok: true; needsRestart: boolean; quitStarted: boolean; message: string }>(
+    IPC_CHANNELS.updatesInstall,
+    async (_event, target) => {
+      const url = target === "front"
+        ? "https://github.com/Twinded/claude-messenger/releases/latest"
+        : "https://docs.anthropic.com/claude/docs/agents-and-tools/agent-sdk";
+      if (isSafeExternalUrl(url)) await shell.openExternal(url);
+      return {
+        ok: true,
+        needsRestart: false,
+        quitStarted: false,
+        message: "Téléchargement ouvert dans le navigateur."
+      };
+    },
+    logDebug
+  );
+
+  safeHandle<string, { ok: true }>(
+    IPC_CHANNELS.updatesRestart,
+    async () => {
+      app.relaunch();
+      app.exit(0);
+      return { ok: true };
+    },
+    logDebug
+  );
+
   // ── Channels still pending real implementation ────────────────────────
   const stubbedChannels: readonly string[] = [
     IPC_CHANNELS.conversationOpenThread,
@@ -397,17 +650,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
     IPC_CHANNELS.conversationLoadPreviousMessages,
     IPC_CHANNELS.conversationReorderThreads,
     IPC_CHANNELS.conversationCompact,
-    IPC_CHANNELS.conversationFork,
-    IPC_CHANNELS.mediaPickFile,
-    IPC_CHANNELS.mediaSaveDataUrl,
-    IPC_CHANNELS.profileChoosePicture,
-    IPC_CHANNELS.profileClearPicture,
-    IPC_CHANNELS.updatesCheck,
-    IPC_CHANNELS.updatesOpen,
-    IPC_CHANNELS.updatesInstall,
-    IPC_CHANNELS.updatesRestart,
-    IPC_CHANNELS.appSaveText,
-    IPC_CHANNELS.appChooseDirectory
+    IPC_CHANNELS.conversationFork
   ];
   for (const channel of stubbedChannels) {
     safeHandle<unknown, NotImplementedResult>(

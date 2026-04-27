@@ -1,16 +1,13 @@
 /**
- * Renderer entry — MSN Messenger style shell wired to the Claude Agent SDK.
+ * Renderer entry — MSN Messenger-style shell for Claude Messenger.
  *
- * The visual layout, classNames, and most of the chrome match the upstream
- * codex-messenger so the cascade in `styles.css` lights up the windows the
- * same way. The data model is Claude-native: messages flow through the
- * `claude:*` IPC stream channels and are adapted to the flat shape the
- * vendored `chatParts.jsx` expects.
+ * Two views are routed from the same bundle:
+ *   - `?view=main` (default)            → roster window
+ *   - `?view=conversation&contactId=X`  → standalone chat window
  *
- * Pieces that still need porting from upstream (full RosterView with
- * project picker, AgentCreator, ProfileEditor, Settings dialog with
- * sandbox/MCP UI, demo mode, GamesPanel, multi-window per conversation)
- * are tracked in IMPLEMENTATION_PLAN.md and will land in follow-up commits.
+ * The main process opens a fresh BrowserWindow per conversation by
+ * loading the renderer with the conversation query string, mirroring the
+ * MSN one-window-per-thread UX.
  */
 
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,16 +17,20 @@ import "./styles.css";
 import "./styles-claude-messenger.css";
 
 import { ClaudeConfigurationDialog } from "./claudeConfigurationDialog.jsx";
-import { Message as MsnMessage } from "./chatParts.jsx";
+import { ApprovalRequestsPanel, Message as MsnMessage } from "./chatParts.jsx";
 import { extractWinkFromText } from "./winks.js";
-import { renderFormattedMessageText } from "./messageFormatting.jsx";
+import { animatedInlineEmoticons, renderFormattedMessageText } from "./messageFormatting.jsx";
+import msnEmoticons from "./msnEmoticons.js";
 import {
   playNewMessage,
+  playSoundKey,
   playWink,
   playWizz
 } from "./soundEffects.js";
 import { Logo, ResizeGrip, Titlebar } from "./windowChrome.jsx";
 import { useClaudeEvents } from "./useClaudeEvents.js";
+import { useUpdates } from "./useUpdates.js";
+import UpdateDialog from "./updateDialog.jsx";
 
 const api = window.claudeMsn;
 
@@ -40,18 +41,35 @@ function nowTime() {
   return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function previewFromContent(content) {
-  if (!Array.isArray(content)) return "";
-  for (const block of content) {
-    if (block.type === "text" && block.text) return block.text.slice(0, 80);
-  }
-  return "";
+function getRouteParams() {
+  const search = new URLSearchParams(window.location.search);
+  return {
+    view: search.get("view") ?? "main",
+    contactId: search.get("contactId") ?? null
+  };
 }
 
-/**
- * Adapt a Claude Message into the flat shape the vendored MSN
- * `chatParts.Message` component expects.
- */
+function permissionDecisionFromUpstream(decision) {
+  if (decision === "approved") return "allow";
+  if (decision === "approved_for_session") return "allow-once";
+  return "deny";
+}
+
+function approvalFromPermissionEvent(request) {
+  return {
+    approvalId: request.requestId,
+    title: request.toolName,
+    riskLevel: request.toolName.includes("Bash") || request.toolName.includes("Write") ? "high" : "low",
+    kind: request.toolName.toLowerCase().includes("bash") ? "command" : "file",
+    reason: `Claude veut utiliser l'outil ${request.toolName}.`,
+    command: JSON.stringify(request.input ?? {}, null, 2).slice(0, 600),
+    fileChanges: [],
+    cwd: "",
+    canApproveForSession: false,
+    riskDescription: ""
+  };
+}
+
 function claudeMessageToMsn(message, contactName) {
   if (!message) return null;
   const flatText = (message.content || [])
@@ -120,8 +138,11 @@ function claudeMessageToMsn(message, contactName) {
 // ── App router ────────────────────────────────────────────────────────
 
 function App() {
+  const route = useMemo(getRouteParams, []);
   const [bootstrapResult, setBootstrapResult] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [agentCreatorOpen, setAgentCreatorOpen] = useState(false);
 
   useEffect(() => {
     void api.bootstrap().then(setBootstrapResult);
@@ -154,19 +175,67 @@ function App() {
     );
   }
 
-  return <MainShell bootstrap={bootstrapResult} onOpenSettings={() => setShowSettings(true)} />;
+  // Standalone conversation window route
+  if (route.view === "conversation" && route.contactId) {
+    const contact = bootstrapResult.contacts.find((c) => c.id === route.contactId);
+    if (!contact) {
+      return (
+        <main className="msn-window">
+          <Titlebar title="Claude Messenger" />
+          <div className="boot-screen">Contact introuvable.</div>
+        </main>
+      );
+    }
+    return <ChatWindow contact={contact} standalone />;
+  }
+
+  return (
+    <>
+      <MainShell
+        bootstrap={bootstrapResult}
+        onOpenSettings={() => setShowSettings(true)}
+        onOpenProfileEditor={() => setProfileEditorOpen(true)}
+        onOpenAgentCreator={() => setAgentCreatorOpen(true)}
+        refreshBootstrap={async () => setBootstrapResult(await api.bootstrap())}
+      />
+      {profileEditorOpen ? (
+        <ProfileEditor
+          settings={bootstrapResult.settings}
+          onClose={async () => {
+            setProfileEditorOpen(false);
+            setBootstrapResult(await api.bootstrap());
+          }}
+        />
+      ) : null}
+      {agentCreatorOpen ? (
+        <AgentCreator
+          onClose={async () => {
+            setAgentCreatorOpen(false);
+            setBootstrapResult(await api.bootstrap());
+          }}
+        />
+      ) : null}
+    </>
+  );
 }
 
-// ── Roster + chat split shell ─────────────────────────────────────────
+// ── Main shell (roster) ───────────────────────────────────────────────
 
-function MainShell({ bootstrap, onOpenSettings }) {
-  const [activeContactId, setActiveContactId] = useState(null);
+function MainShell({ bootstrap, onOpenSettings, onOpenProfileEditor, onOpenAgentCreator, refreshBootstrap }) {
   const [search, setSearch] = useState("");
   const [contacts, setContacts] = useState(bootstrap.contacts);
+  const updates = useUpdates({ api, appVersion: bootstrap.appVersion, initialCheck: true });
 
   useEffect(() => {
     setContacts(bootstrap.contacts);
   }, [bootstrap.contacts]);
+
+  // Re-fetch contacts on roster events (new agent, status change, etc.)
+  useEffect(() => {
+    return api.on("conversation:notify", () => {
+      void api.listContacts().then(setContacts);
+    });
+  }, []);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -184,65 +253,91 @@ function MainShell({ bootstrap, onOpenSettings }) {
     return [...map.entries()];
   }, [filtered]);
 
-  const activeContact = contacts.find((c) => c.id === activeContactId) ?? null;
+  const openConversation = useCallback((contactId) => {
+    void api.openConversation(contactId);
+  }, []);
+
+  const updateAvailable = Boolean(updates.updateState?.front?.updateAvailable);
 
   return (
-    <div className="msn-shell">
-      <main className="msn-window">
-        <Titlebar title="Claude Messenger" />
-        <div className="toolbar-shell">
-          <nav className="toolbar">
-            <span className="toolbar-brand">
-              <Logo small />
-              <span>Claude Messenger</span>
-            </span>
-            <button type="button" onClick={onOpenSettings} className="top-update-button" aria-label="Réglages">
-              ⚙ Réglages
+    <main className="msn-window">
+      <Titlebar title="Claude Messenger" />
+
+      <div className="toolbar-shell">
+        <nav className="toolbar">
+          <span className="toolbar-brand">
+            <Logo small />
+            <span>Claude Messenger</span>
+          </span>
+          {updateAvailable ? (
+            <button
+              type="button"
+              onClick={() => updates.checkForUpdates({ force: true })}
+              className="top-update-button"
+              style={{ background: "#fff3a0" }}
+            >
+              ⬇ Mise à jour
             </button>
-          </nav>
-        </div>
+          ) : null}
+          <button type="button" onClick={onOpenProfileEditor} className="top-update-button">
+            👤 Profil
+          </button>
+          <button type="button" onClick={onOpenAgentCreator} className="top-update-button">
+            ＋ Agent
+          </button>
+          <button type="button" onClick={onOpenSettings} className="top-update-button">
+            ⚙ Réglages
+          </button>
+        </nav>
+      </div>
 
-        <div className="roster">
-          <div className="contact-actions">
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Rechercher un contact…"
-              className="msn-combo-input"
-            />
-          </div>
-
-          <div className="groups">
-            {grouped.map(([group, items]) => (
-              <RosterGroup
-                key={group}
-                title={group}
-                contacts={items}
-                activeContactId={activeContactId}
-                onSelect={setActiveContactId}
-              />
-            ))}
-          </div>
-        </div>
-        <ResizeGrip />
-      </main>
-
-      {activeContact ? (
-        <ChatWindow contact={activeContact} />
+      {updates.updateDialogOpen ? (
+        <UpdateDialog
+          state={updates.updateState}
+          progress={updates.updateProgress}
+          actionMessage={updates.updateActionMessage}
+          installingTarget={updates.installingUpdateTarget}
+          onClose={() => updates.setUpdateDialogOpen(false)}
+          onRecheck={() => updates.checkForUpdates({ force: true })}
+          onOpenTarget={updates.openUpdateTarget}
+          onInstallTarget={updates.installUpdateTarget}
+          onRestart={updates.restartForUpdate}
+        />
       ) : null}
-    </div>
+
+      <div className="roster">
+        <div className="contact-actions">
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Rechercher un contact…"
+            className="msn-combo-input"
+          />
+        </div>
+
+        <div className="groups">
+          {grouped.map(([group, items]) => (
+            <RosterGroup
+              key={group}
+              title={group}
+              contacts={items}
+              onOpen={openConversation}
+            />
+          ))}
+        </div>
+      </div>
+      <ResizeGrip />
+    </main>
   );
 }
 
-function RosterGroup({ title, contacts, activeContactId, onSelect }) {
+function RosterGroup({ title, contacts, onOpen }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <section className="roster-group">
       <header className="group-heading" onClick={() => setCollapsed(!collapsed)}>
-        <strong>
-          {collapsed ? "▶" : "▼"} {title}
-        </strong>
+        <strong>{collapsed ? "▶" : "▼"} {title}</strong>
         <span className="group-sort-label">{contacts.length}</span>
       </header>
       {!collapsed ? (
@@ -251,8 +346,9 @@ function RosterGroup({ title, contacts, activeContactId, onSelect }) {
             <button
               key={contact.id}
               type="button"
-              className={`contact-line ${activeContactId === contact.id ? "expanded" : ""} ${contact.unread > 0 ? "has-unread" : ""}`}
-              onClick={() => onSelect(contact.id)}
+              className={`contact-line ${contact.unread > 0 ? "has-unread" : ""}`}
+              onDoubleClick={() => onOpen(contact.id)}
+              onClick={() => onOpen(contact.id)}
             >
               <span className="contact-mini-avatar">
                 <span className={`avatar status-${contact.status}`} aria-hidden="true" />
@@ -276,12 +372,16 @@ function RosterGroup({ title, contacts, activeContactId, onSelect }) {
 
 // ── Chat window ───────────────────────────────────────────────────────
 
-function ChatWindow({ contact }) {
+function ChatWindow({ contact, standalone = false }) {
   const [thread, setThread] = useState(null);
   const [historicalMessages, setHistoricalMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [winkAnimation, setWinkAnimation] = useState(null);
+  const [emoticonOpen, setEmoticonOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [attachments, setAttachments] = useState([]);
   const transcriptRef = useRef(null);
+  const composerRef = useRef(null);
 
   const { state } = useClaudeEvents(thread?.id ?? null);
 
@@ -294,6 +394,19 @@ function ChatWindow({ contact }) {
     });
   }, [contact.id]);
 
+  // Listen for permission requests
+  useEffect(() => {
+    const off = api.on("claude:permission-request", (request) => {
+      if (!thread || request.threadId !== thread.id) return;
+      setPendingApprovals((current) => [
+        ...current.filter((r) => r.approvalId !== request.requestId),
+        approvalFromPermissionEvent(request)
+      ]);
+      playSoundKey?.("ring");
+    });
+    return off;
+  }, [thread?.id]);
+
   const allMessages = useMemo(() => {
     const fromHistory = historicalMessages.map((m) => claudeMessageToMsn(m, contact.displayName)).filter(Boolean);
     const fromStream = state.messages.map((m) => claudeMessageToMsn(m, contact.displayName)).filter(Boolean);
@@ -304,14 +417,14 @@ function ChatWindow({ contact }) {
     return merged;
   }, [historicalMessages, state.messages, contact.displayName]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll
   useEffect(() => {
     const node = transcriptRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
   }, [allMessages.length, state.streamingText, state.thinkingText]);
 
-  // Play sound on new completed assistant message
+  // Sounds + winks
   const lastMessageIdRef = useRef(null);
   useEffect(() => {
     const last = state.messages[state.messages.length - 1];
@@ -329,11 +442,11 @@ function ChatWindow({ contact }) {
     }
   }, [state.messages]);
 
-  // Listen for the wizz IPC event
+  // Wizz event from main process
   useEffect(() => {
     return api.on("window:wizz", () => {
       playWizz();
-      const node = transcriptRef.current?.parentElement?.parentElement;
+      const node = document.body;
       if (node) {
         node.classList.add("wizz-shake");
         setTimeout(() => node.classList.remove("wizz-shake"), 800);
@@ -342,12 +455,35 @@ function ChatWindow({ contact }) {
   }, []);
 
   const handleSend = useCallback(async (event) => {
-    event.preventDefault();
-    if (!draft.trim() || !thread) return;
+    event?.preventDefault?.();
+    if (!thread) return;
+    if (!draft.trim() && attachments.length === 0) return;
+
+    const items = [];
+    for (const attachment of attachments) {
+      if (attachment.dataUrl) {
+        const match = attachment.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          items.push({
+            type: "image",
+            source: { type: "base64", data: match[2], mediaType: match[1] }
+          });
+        }
+      }
+    }
+    if (draft.trim()) items.push({ type: "text", text: draft });
+
     const text = draft;
     setDraft("");
-    await api.sendMessage({ contactId: contact.id, threadId: thread.id, text });
-  }, [contact.id, draft, thread]);
+    setAttachments([]);
+    setEmoticonOpen(false);
+
+    if (items.length === 1 && items[0].type === "text") {
+      await api.sendMessage({ contactId: contact.id, threadId: thread.id, text });
+    } else {
+      await api.sendItems({ contactId: contact.id, threadId: thread.id, items });
+    }
+  }, [contact.id, draft, thread, attachments]);
 
   const handleWizz = useCallback(() => {
     void api.wizz(contact.id);
@@ -359,8 +495,37 @@ function ChatWindow({ contact }) {
     await api.interruptTurn({ contactId: contact.id, threadId: thread.id });
   }, [contact.id, thread]);
 
+  const handleApprovalRespond = useCallback(async (request, decision) => {
+    setPendingApprovals((current) =>
+      current.map((r) => r.approvalId === request.approvalId ? { ...r, sendingDecision: true } : r)
+    );
+    await api.respondApproval({
+      requestId: request.approvalId,
+      decision: permissionDecisionFromUpstream(decision)
+    });
+    setPendingApprovals((current) => current.filter((r) => r.approvalId !== request.approvalId));
+  }, []);
+
+  const handleInsertEmoticon = useCallback((code) => {
+    setDraft((current) => `${current}${code} `);
+    setEmoticonOpen(false);
+    composerRef.current?.focus();
+  }, []);
+
+  const handlePickFile = useCallback(async () => {
+    const result = await api.pickFile({ extensions: ["png", "jpg", "jpeg", "gif", "webp"] });
+    if (!result?.ok || !result.file?.path) return;
+    setAttachments((current) => [...current, {
+      path: result.file.path,
+      name: result.file.name,
+      dataUrl: result.file.dataUrl
+    }]);
+  }, []);
+
+  const showApprovals = pendingApprovals.length > 0;
+
   return (
-    <main className="msn-window chat" key={contact.id}>
+    <main className={`msn-window chat${standalone ? " standalone" : ""}`} key={contact.id}>
       <Titlebar title={`${contact.displayName} — Conversation`} />
 
       <div className="toolbar-shell">
@@ -376,6 +541,13 @@ function ChatWindow({ contact }) {
       <section className="chat-body">
         <div className="chat-main">
           <div className="to-line">À : {contact.displayName}</div>
+
+          {showApprovals ? (
+            <ApprovalRequestsPanel
+              requests={pendingApprovals}
+              onRespond={handleApprovalRespond}
+            />
+          ) : null}
 
           <div ref={transcriptRef} className="transcript">
             {allMessages.length === 0 ? (
@@ -413,7 +585,47 @@ function ChatWindow({ contact }) {
           </div>
 
           <form className="composer" onSubmit={handleSend}>
+            {emoticonOpen ? (
+              <div className="composer-popup emoticon-popup">
+                {msnEmoticons.slice(0, 64).map((emoticon) => (
+                  <button
+                    key={emoticon.id ?? emoticon.code}
+                    type="button"
+                    onClick={() => handleInsertEmoticon(emoticon.code)}
+                    title={emoticon.code}
+                  >
+                    {emoticon.url ? (
+                      <img src={emoticon.url} alt={emoticon.code} draggable="false" />
+                    ) : (
+                      <span>{emoticon.code}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {attachments.length ? (
+              <div className="composer-attachments">
+                {attachments.map((attachment, index) => (
+                  <button
+                    type="button"
+                    key={`${attachment.path}-${index}`}
+                    onClick={() =>
+                      setAttachments((current) => current.filter((_, i) => i !== index))
+                    }
+                    title="Retirer la pièce jointe"
+                  >
+                    {attachment.dataUrl ? (
+                      <img src={attachment.dataUrl} alt="" />
+                    ) : null}
+                    <span>{attachment.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             <textarea
+              ref={composerRef}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -425,14 +637,27 @@ function ChatWindow({ contact }) {
               rows={3}
               placeholder={`Écris à ${contact.displayName}…`}
             />
+
             <div className="format-strip">
-              <button type="button" onClick={handleWizz} title="Wizz / Nudge">⚡ Wizz</button>
+              <button
+                type="button"
+                onClick={() => setEmoticonOpen((open) => !open)}
+                title="Émoticônes"
+              >
+                😊
+              </button>
+              <button type="button" onClick={handlePickFile} title="Joindre un fichier">
+                📎
+              </button>
+              <button type="button" onClick={handleWizz} title="Wizz / Nudge">
+                ⚡ Wizz
+              </button>
               {state.isStreaming ? (
                 <button type="button" onClick={handleInterrupt} className="format-status">
                   ⏹ Stop
                 </button>
               ) : null}
-              <button type="submit" disabled={!draft.trim() || state.isStreaming}>
+              <button type="submit" disabled={state.isStreaming || (!draft.trim() && attachments.length === 0)}>
                 Envoyer
               </button>
             </div>
@@ -452,17 +677,255 @@ function ChatWindow({ contact }) {
               <strong className="msn-service-title">Tokens</strong>
               <div className="msn-service-body">
                 in {state.lastUsage.inputTokens} · out {state.lastUsage.outputTokens}
-                {state.lastUsage.cacheReadInputTokens
-                  ? <> · cache {state.lastUsage.cacheReadInputTokens}</>
-                  : null}
+                {state.lastUsage.cacheReadInputTokens ? (
+                  <> · cache {state.lastUsage.cacheReadInputTokens}</>
+                ) : null}
               </div>
             </div>
           ) : null}
+          <div className="msn-service-panel">
+            <strong className="msn-service-title">Threads récents</strong>
+            <ThreadList contactId={contact.id} activeThreadId={thread?.id} />
+          </div>
         </aside>
       </section>
 
       <ResizeGrip />
     </main>
+  );
+}
+
+function ThreadList({ contactId, activeThreadId }) {
+  const [threads, setThreads] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listConversations({ contactId, limit: 12 })
+      .then((result) => {
+        if (cancelled) return;
+        setThreads(Array.isArray(result) ? result : []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contactId, activeThreadId]);
+
+  if (!threads.length) {
+    return <div className="msn-service-body">Aucun thread précédent.</div>;
+  }
+  return (
+    <ul className="thread-list">
+      {threads.map((thread) => (
+        <li key={thread.id} className={thread.id === activeThreadId ? "active" : ""}>
+          <strong>{thread.title || "Conversation"}</strong>
+          <small>{thread.lastMessagePreview || "—"}</small>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ── Profile editor ────────────────────────────────────────────────────
+
+function ProfileEditor({ settings, onClose }) {
+  const [statusMessage, setStatusMessage] = useState(settings.profileStatusMessage ?? "");
+  const [picturePath, setPicturePath] = useState(settings.profilePicturePath ?? "");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function pickPicture() {
+    setBusy(true);
+    try {
+      const result = await api.chooseProfilePicture();
+      if (result?.ok && result.path) setPicturePath(result.path);
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearPicture() {
+    setBusy(true);
+    try {
+      await api.clearProfilePicture();
+      setPicturePath("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const patch = { profileStatusMessage: statusMessage };
+      if (picturePath) patch.profilePicturePath = picturePath;
+      await api.setSettings(patch);
+      onClose?.();
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="settings-dialog-backdrop">
+      <div className="settings-dialog profile-editor">
+        <h2>Mon profil</h2>
+        {picturePath ? (
+          <div className="profile-editor-picture">
+            <img src={picturePath.startsWith("data:") ? picturePath : `file://${picturePath}`} alt="" />
+          </div>
+        ) : null}
+        <button type="button" onClick={pickPicture} disabled={busy}>Choisir une image</button>
+        <button type="button" onClick={clearPicture} disabled={busy || !picturePath}>Retirer</button>
+
+        <label className="msn-login-field">
+          <span>Message de statut</span>
+          <input
+            type="text"
+            value={statusMessage}
+            onChange={(event) => setStatusMessage(event.target.value)}
+            placeholder="Ex. occupé, sur Claude…"
+            maxLength={120}
+          />
+        </label>
+
+        {error ? <p className="profile-editor-error">{error}</p> : null}
+
+        <div className="profile-editor-actions">
+          <button type="button" onClick={save} disabled={busy} className="msn-signin-button">Enregistrer</button>
+          <button type="button" onClick={onClose} disabled={busy}>Annuler</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Agent creator ─────────────────────────────────────────────────────
+
+const SUBAGENT_GROUPS = ["Subagents", "Reviewers", "Designers", "Helpers"];
+const ICON_OPTIONS = ["robot", "sparkles", "wrench", "lightbulb", "briefcase", "magnifier"];
+const COLOR_SWATCHES = ["#4f8df3", "#7b61ff", "#2bb673", "#f0ad4e", "#d9534f", "#19457e", "#5b8c00"];
+
+function AgentCreator({ onClose }) {
+  const [displayName, setDisplayName] = useState("");
+  const [group, setGroup] = useState(SUBAGENT_GROUPS[0]);
+  const [iconKey, setIconKey] = useState(ICON_OPTIONS[0]);
+  const [color, setColor] = useState(COLOR_SWATCHES[0]);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [workingDirectory, setWorkingDirectory] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function pickRunFolder() {
+    const result = await api.chooseDirectory({ title: "Dossier de travail" });
+    if (result?.ok && result.path) setWorkingDirectory(result.path);
+  }
+
+  async function submit() {
+    if (!displayName.trim() || !systemPrompt.trim()) {
+      setError("Nom et instructions sont requis.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.createAgent({
+        displayName: displayName.trim(),
+        group,
+        iconKey,
+        color,
+        systemPrompt: systemPrompt.trim(),
+        workingDirectory: workingDirectory || undefined
+      });
+      if (!result?.ok) throw new Error(result?.message || "Création impossible");
+      onClose?.();
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="settings-dialog-backdrop">
+      <div className="settings-dialog agent-editor">
+        <header className="agent-editor-head">
+          <h2>Nouveau contact</h2>
+        </header>
+
+        <div className="agent-editor-grid">
+          <label className="msn-login-field">
+            <span>Nom</span>
+            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} />
+          </label>
+
+          <label className="msn-login-field">
+            <span>Groupe</span>
+            <select value={group} onChange={(event) => setGroup(event.target.value)}>
+              {SUBAGENT_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </label>
+
+          <label className="msn-login-field">
+            <span>Icône</span>
+            <select value={iconKey} onChange={(event) => setIconKey(event.target.value)}>
+              {ICON_OPTIONS.map((icon) => <option key={icon} value={icon}>{icon}</option>)}
+            </select>
+          </label>
+
+          <div className="agent-color-field">
+            <span>Couleur</span>
+            <div className="agent-swatches">
+              {COLOR_SWATCHES.map((swatch) => (
+                <button
+                  type="button"
+                  key={swatch}
+                  className={swatch === color ? "active" : ""}
+                  style={{ background: swatch }}
+                  onClick={() => setColor(swatch)}
+                  aria-label={swatch}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="agent-run-folder">
+            <label className="msn-login-field">
+              <span>Dossier de travail (optionnel)</span>
+              <div className="agent-path-picker">
+                <input
+                  value={workingDirectory}
+                  onChange={(event) => setWorkingDirectory(event.target.value)}
+                  placeholder="/Users/.../mon-projet"
+                />
+                <button type="button" onClick={pickRunFolder}>Parcourir…</button>
+              </div>
+            </label>
+          </div>
+
+          <label className="msn-login-field agent-instructions">
+            <span>Instructions</span>
+            <textarea
+              rows={6}
+              value={systemPrompt}
+              onChange={(event) => setSystemPrompt(event.target.value)}
+              placeholder="Tu es un assistant spécialisé en…"
+            />
+          </label>
+        </div>
+
+        {error ? <p className="agent-error">{error}</p> : null}
+
+        <div className="agent-editor-actions">
+          <button type="button" onClick={submit} disabled={busy} className="msn-signin-button">Créer</button>
+          <button type="button" onClick={onClose} disabled={busy}>Annuler</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
