@@ -120,10 +120,16 @@ class InputQueue<T> implements AsyncIterable<T> {
   }
 
   close(): void {
+    if (this.closed) return;
     this.closed = true;
+    // Drain any pending waiters with the items still in the buffer; only
+    // signal `done: true` once the buffer is empty so we never silently
+    // discard a queued user message at session teardown.
     while (this.waiters.length > 0) {
       const waiter = this.waiters.shift();
-      waiter?.({ value: undefined as T, done: true });
+      const next = this.buffer.shift();
+      if (next !== undefined) waiter?.({ value: next, done: false });
+      else waiter?.({ value: undefined as T, done: true });
     }
   }
 
@@ -136,10 +142,11 @@ class InputQueue<T> implements AsyncIterable<T> {
           else if (this.closed) resolve({ value: undefined as T, done: true });
           else this.waiters.push(resolve);
         }),
-      return: () => {
-        this.close();
-        return Promise.resolve({ value: undefined as T, done: true });
-      }
+      // Called by the SDK consumer when it stops iterating early (interrupt
+      // or break). We deliberately do NOT close the queue here so a fresh
+      // session can be resumed against the same thread without the
+      // producer (`emitter.send`) hitting a "queue closed" error.
+      return: () => Promise.resolve({ value: undefined as T, done: true })
     };
   }
 }
@@ -233,7 +240,14 @@ export function createClaudeAgentClient(
     const pending = pendingPermissions.get(requestId);
     if (!pending) return;
     pendingPermissions.delete(requestId);
-    pending.resolve({ behavior: decision === "deny" ? "deny" : "allow" });
+    if (decision === "deny") {
+      pending.resolve({ behavior: "deny", message: "Denied by user" });
+    } else {
+      // The SDK does not currently distinguish between "allow" and
+      // "allow-once"; both grant the tool call for the current invocation.
+      // The renderer surfaces the distinction as UX hint only.
+      pending.resolve({ behavior: "allow" });
+    }
   };
 
   async function consumeStream(session: ActiveSession): Promise<void> {
@@ -248,7 +262,10 @@ export function createClaudeAgentClient(
         message: error instanceof Error ? error.message : String(error)
       });
     } finally {
+      // Mark the session as not consuming so a future `send()` will reopen
+      // a fresh SDK query() rather than push into a dead AsyncIterable.
       sessions.delete(session.threadId);
+      emit({ kind: "status", text: "session-ended" });
     }
   }
 
@@ -380,8 +397,31 @@ export function createClaudeAgentClient(
   }
 
   emitter.send = async (threadId, content) => {
-    const session = sessions.get(threadId);
-    if (!session) throw new Error(`No active session for thread ${threadId}`);
+    let session = sessions.get(threadId);
+    if (!session) {
+      // The previous turn may have ended (interrupt or natural finish).
+      // Reopen the SDK session against the same thread before pushing the
+      // new user message so callers don't have to track session state.
+      const persisted = options.threadStore.getThread(threadId);
+      if (!persisted) throw new Error(`Unknown thread ${threadId}`);
+      const handle = await emitter.startSession({
+        contact: {
+          id: persisted.contactId,
+          kind: "main-agent",
+          displayName: persisted.title,
+          group: "Claude",
+          iconKey: "main-agent",
+          status: "online",
+          unread: 0
+        },
+        threadId,
+        ...(persisted.sessionId ? { resumeSessionId: persisted.sessionId } : {})
+      });
+      void handle;
+      session = sessions.get(threadId);
+      if (!session) throw new Error(`Failed to reopen session for ${threadId}`);
+    }
+
     const userMessage: Message = {
       id: randomUUID(),
       threadId,

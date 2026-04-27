@@ -94,7 +94,7 @@ export interface ThreadStore {
   updateMessage(message: Message): void;
   listMessages(threadId: ThreadId, opts?: { before?: string; limit?: number }): Message[];
   markRead(contactId: ContactId): void;
-  bumpUnread(contactId: ContactId, threadId: ThreadId, preview: string): void;
+  bumpUnread(threadId: ThreadId, preview: string): void;
   close(): void;
 }
 
@@ -282,7 +282,7 @@ export function createThreadStore({ dbPath }: ThreadStoreOptions): ThreadStore {
       markReadStmt.run(contactId);
     },
 
-    bumpUnread(contactId, threadId, preview) {
+    bumpUnread(threadId, preview) {
       bumpUnreadStmt.run(preview, new Date().toISOString(), threadId);
     },
 

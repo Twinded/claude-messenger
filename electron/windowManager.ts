@@ -135,6 +135,3 @@ export function createBaseWindowFactory(options: CreateBaseWindowFactoryOptions)
   };
 }
 
-export function resolvePreloadPath(dirname: string): string {
-  return path.join(dirname, "preload.cjs");
-}

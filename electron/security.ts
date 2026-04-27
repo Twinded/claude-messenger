@@ -33,12 +33,12 @@ export function isSafeExternalUrl(value: unknown): boolean {
   }
   if (!allowedExternalProtocols.has(url.protocol)) return false;
   if (url.protocol === "mailto:") return Boolean(url.pathname);
-  if (url.protocol === "http:" && !["127.0.0.1", "localhost"].includes(url.hostname)) {
-    return false;
-  }
-  return (
-    allowedHttpHosts.has(url.hostname) || ["127.0.0.1", "localhost"].includes(url.hostname)
-  );
+  // http:// is intentionally rejected entirely — even localhost. Cliquable
+  // links rendered by the assistant should never trigger requests to local
+  // services. The Vite dev server is loaded by the main process via a
+  // dedicated env var, not by passing through this allowlist.
+  if (url.protocol === "http:") return false;
+  return allowedHttpHosts.has(url.hostname);
 }
 
 export interface AssertStringOptions {

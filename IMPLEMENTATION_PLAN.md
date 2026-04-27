@@ -236,7 +236,8 @@ export class ClaudeAgentClient extends EventEmitter {
 
 ## Risques identifiés
 
-1. **Évolution du SDK Anthropic** : le SDK est jeune, des breaking changes sont possibles. Mitigation : pin de version stricte, suivi du changelog.
+1. **⚠ SDK shape à valider contre la version réelle** : `electron/claudeAgentClient.ts` définit `SdkModuleShape` et l'union `SDKMessage` (avec les types `system/assistant/result/stream_event`) à partir d'une lecture de la documentation et de mémoire. **Un audit indépendant a flaggé ce point comme bloqueur** : tant que le client n'a pas été exécuté contre `@anthropic-ai/claude-agent-sdk` réel, considérer que la signature `query()`, le format des messages SDK retournés, et la callback `canUseTool` peuvent diverger. Premier travail de Phase 5+ : `npm install @anthropic-ai/claude-agent-sdk@latest` puis aligner les types et le `handleSdkMessage` switch sur la vraie API.
+2. **Évolution du SDK Anthropic** : le SDK est jeune, des breaking changes sont possibles. Mitigation : pin de version stricte, suivi du changelog.
 2. **Skills/MCP en lecture-seule** : si la structure de `~/.claude/skills/` change, le watcher casse. Mitigation : parser tolérant + fallback.
 3. **Branding Anthropic** : risque si on est trop visible. Mitigation : disclaimer omniprésent, pas de logo Anthropic, naming prudent.
 4. **Performance multi-sessions** : plusieurs `query()` simultanés en mémoire. Mitigation : LRU sur les sessions inactives, pause/resume sur fermeture de fenêtre.

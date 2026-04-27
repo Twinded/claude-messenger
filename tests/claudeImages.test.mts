@@ -7,7 +7,7 @@ import {
   imageBlockFromUrl,
   imageSrcFromPathOrUrl,
   isImageDataUrl
-} from "../shared/claudeImages.js";
+} from "../electron/claudeImages.js";
 
 test("detectMediaType maps common extensions", () => {
   assert.equal(detectMediaType("photo.png"), "image/png");

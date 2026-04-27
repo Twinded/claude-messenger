@@ -24,9 +24,12 @@ test("isSafeExternalUrl rejects non-http/https/mailto protocols", () => {
   assert.equal(isSafeExternalUrl("data:text/html,<script>"), false);
 });
 
-test("isSafeExternalUrl allows http only for localhost", () => {
-  assert.equal(isSafeExternalUrl("http://127.0.0.1:5174"), true);
-  assert.equal(isSafeExternalUrl("http://localhost:5174"), true);
+test("isSafeExternalUrl rejects all plain http:// links", () => {
+  // The Vite dev server URL is forwarded through a separate env var, not
+  // through this allowlist, so even http://localhost is intentionally
+  // rejected to prevent cross-origin SSRF via assistant-rendered links.
+  assert.equal(isSafeExternalUrl("http://127.0.0.1:5174"), false);
+  assert.equal(isSafeExternalUrl("http://localhost:5174"), false);
   assert.equal(isSafeExternalUrl("http://example.com"), false);
 });
 
