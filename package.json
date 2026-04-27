@@ -18,6 +18,8 @@
     "build:preload": "node scripts/build-preload.mjs",
     "build": "npm run build:electron && npm run build:preload && npm run build:renderer",
     "clean": "rm -rf dist dist-electron release",
+    "rebuild:native": "electron-rebuild",
+    "postinstall": "electron-rebuild",
     "electron:dev": "node scripts/dev-electron.mjs",
     "electron:start": "npm run build && electron .",
     "test": "node --import tsx --test tests/*.test.mts",
@@ -25,7 +27,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "*",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.9.0",
     "chokidar": "^4.0.0",
     "keytar": "^7.9.0",
     "react": "^19.1.1",
@@ -33,7 +35,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
+    "@electron/rebuild": "^4.0.4",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
