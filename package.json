@@ -6,16 +6,18 @@
   "license": "MIT",
   "private": false,
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5174",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
-    "build": "npm run build:electron && npm run build:renderer",
+    "build:preload": "node scripts/build-preload.mjs",
+    "build": "npm run build:electron && npm run build:preload && npm run build:renderer",
+    "clean": "rm -rf dist dist-electron release",
     "electron:dev": "node scripts/dev-electron.mjs",
     "electron:start": "npm run build && electron .",
     "test": "node --test tests/*.test.mts",

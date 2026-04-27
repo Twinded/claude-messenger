@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM"],
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": true,
+    "allowJs": false,
+    "esModuleInterop": true,
+    "isolatedModules": false
+  },
+  "include": ["electron/preload.ts", "shared/types.ts"],
+  "exclude": ["node_modules", "dist", "release", "vendor", "src", "tests"]
+}

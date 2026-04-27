@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "jsx": "preserve",
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": true,
+    "allowJs": false
+  },
+  "include": ["electron", "shared/types.ts", "shared/threadSelection.js", "shared/versionUtils.js", "shared/languages.js"],
+  "exclude": ["node_modules", "dist", "release", "vendor", "src", "tests"]
+}
