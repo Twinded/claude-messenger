@@ -1,8 +1,11 @@
 /**
  * Electron main process entry. Sets up the app lifecycle, the main window,
- * the settings store, and registers IPC handlers. Claude SDK plumbing is
- * deferred to electron/claudeAgentClient.ts (added in Phase 3); this file
- * stays focused on Electron concerns and dependency wiring.
+ * the settings store, the Claude Agent SDK client, contact discovery, and
+ * the IPC bridge that the renderer talks to.
+ *
+ * Renderer-visible side effects all flow through `electron/ipcHandlers.ts`;
+ * stream events from the Agent SDK are forwarded over the `claude:*` and
+ * `conversation:*` IPC channels declared in `shared/types.ts`.
  */
 
 import { app, BrowserWindow } from "electron";
@@ -10,12 +13,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createSettingsStore } from "./settingsStore.js";
+import { createAuthBridge } from "./authBridge.js";
+import { createThreadStore, resolveThreadDbPath } from "./threadStore.js";
+import { createAgentsWatcher } from "./agentsWatcher.js";
+import { createSkillsWatcher } from "./skillsWatcher.js";
+import { createContactRegistry, type CustomAgentRecord } from "./contactRegistry.js";
+import { createClaudeAgentClient } from "./claudeAgentClient.js";
 import {
   createBaseWindowFactory,
   setStableWindowTitle,
   type WindowKey
 } from "./windowManager.js";
 import { registerIpcHandlers } from "./ipcHandlers.js";
+import { STREAM_CHANNELS } from "../shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +46,7 @@ function showDockIcon(): void {
 
 function appIconPath(): string | undefined {
   const iconDir = isDev
-    ? path.join(__dirname, "..", "public", "icons")
+    ? path.join(__dirname, "..", "..", "public", "icons")
     : path.join(process.resourcesPath, "public", "icons");
   if (process.platform === "win32") return path.join(iconDir, "claude-messenger.ico");
   if (process.platform === "darwin") return path.join(iconDir, "claude-messenger.icns");
@@ -47,7 +57,7 @@ function rendererEntryUrl(): string {
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     return process.env.VITE_DEV_SERVER_URL;
   }
-  const indexHtml = path.join(__dirname, "..", "dist", "index.html");
+  const indexHtml = path.join(__dirname, "..", "..", "dist", "index.html");
   return `file://${indexHtml}`;
 }
 
@@ -55,22 +65,96 @@ function settingsFilePath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
-const settings = createSettingsStore({ filePath: settingsFilePath });
+function customAgentsFilePath(): string {
+  return path.join(app.getPath("userData"), "custom-agents.json");
+}
 
-const createBaseWindow = createBaseWindowFactory({
-  preloadPath: path.join(__dirname, "preload.cjs"),
-  appIconPath: appIconPath(),
-  windows,
-  showDockIcon,
-  smokeTest: isSmokeTest,
-  onSmokeReady: () => {
-    logDebug("smoke.ready");
-    app.quit();
-  },
-  logDebug
-});
+async function loadCustomAgents(): Promise<CustomAgentRecord[]> {
+  const fs = await import("node:fs/promises");
+  try {
+    const raw = await fs.readFile(customAgentsFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as CustomAgentRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
 
-async function createMainWindow(): Promise<BrowserWindow> {
+async function bootstrap(): Promise<void> {
+  await app.whenReady();
+
+  const settings = createSettingsStore({ filePath: settingsFilePath });
+  const { settings: currentSettings } = await settings.load();
+
+  const auth = createAuthBridge();
+  await auth.applyToProcessEnv();
+
+  const threadStore = createThreadStore({
+    dbPath: resolveThreadDbPath(app.getPath("userData"))
+  });
+
+  const agentsWatcher = createAgentsWatcher();
+  const skillsWatcher = createSkillsWatcher();
+  await agentsWatcher.refresh();
+  await skillsWatcher.refresh();
+
+  const contactRegistry = createContactRegistry({
+    agentsWatcher,
+    skillsWatcher,
+    threadStore,
+    loadCustomAgents,
+    defaultModel: currentSettings.defaultModel
+  });
+  await contactRegistry.refresh();
+
+  const claudeClient = createClaudeAgentClient({
+    threadStore,
+    defaults: {
+      model: currentSettings.defaultModel as never,
+      maxOutputTokens: currentSettings.maxOutputTokens,
+      maxThinkingTokens: currentSettings.maxThinkingTokens,
+      permissionMode: currentSettings.permissionMode
+    }
+  });
+
+  claudeClient.on("stream", (event) => {
+    const channel = streamChannelFor(event.kind);
+    for (const win of windows.values()) {
+      if (!win.isDestroyed()) win.webContents.send(channel, event);
+    }
+  });
+
+  const createBaseWindow = createBaseWindowFactory({
+    preloadPath: path.join(__dirname, "..", "preload.cjs"),
+    appIconPath: appIconPath(),
+    windows,
+    showDockIcon,
+    smokeTest: isSmokeTest,
+    onSmokeReady: () => {
+      logDebug("smoke.ready");
+      app.quit();
+    },
+    logDebug
+  });
+
+  registerIpcHandlers({
+    settings,
+    auth,
+    threadStore,
+    contactRegistry,
+    claudeClient,
+    windows,
+    createBaseWindow,
+    rendererEntryUrl,
+    logDebug
+  });
+
+  await createMainWindow(createBaseWindow);
+}
+
+async function createMainWindow(
+  createBaseWindow: ReturnType<typeof createBaseWindowFactory>
+): Promise<BrowserWindow> {
   const win = createBaseWindow("main", {
     width: 320,
     height: 600,
@@ -83,11 +167,28 @@ async function createMainWindow(): Promise<BrowserWindow> {
   return win;
 }
 
-async function bootstrap(): Promise<void> {
-  await app.whenReady();
-  await settings.load();
-  registerIpcHandlers({ settings, windows, createBaseWindow, logDebug });
-  await createMainWindow();
+function streamChannelFor(kind: string): string {
+  switch (kind) {
+    case "delta":
+      return STREAM_CHANNELS.delta;
+    case "thinking":
+      return STREAM_CHANNELS.thinking;
+    case "tool-use":
+      return STREAM_CHANNELS.toolUse;
+    case "tool-result":
+      return STREAM_CHANNELS.toolResult;
+    case "message-completed":
+      return STREAM_CHANNELS.messageCompleted;
+    case "turn-completed":
+      return STREAM_CHANNELS.turnCompleted;
+    case "permission-request":
+      return STREAM_CHANNELS.permissionRequest;
+    case "status":
+      return STREAM_CHANNELS.status;
+    case "error":
+    default:
+      return STREAM_CHANNELS.error;
+  }
 }
 
 app.on("window-all-closed", () => {
@@ -95,7 +196,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
+  if (BrowserWindow.getAllWindows().length === 0) void bootstrap();
 });
 
 bootstrap().catch((error) => {
