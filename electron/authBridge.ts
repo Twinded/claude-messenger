@@ -12,6 +12,7 @@
  * crosses the IPC boundary.
  */
 
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -56,6 +57,10 @@ function claudeCredentialsPath(): string {
   return path.join(os.homedir(), ".claude", ".credentials.json");
 }
 
+function claudeHomeDir(): string {
+  return path.join(os.homedir(), ".claude");
+}
+
 async function fileExists(target: string): Promise<boolean> {
   try {
     await fs.access(target);
@@ -65,10 +70,44 @@ async function fileExists(target: string): Promise<boolean> {
   }
 }
 
+/**
+ * Detects an existing Claude Code installation. The credential storage
+ * differs per platform:
+ *   - Linux / Windows: ~/.claude/.credentials.json (plain file).
+ *   - macOS: macOS Keychain under the service "Claude Code-credentials"
+ *     (no file is written). We check Keychain via the `security` CLI to
+ *     avoid triggering a Keychain prompt with keytar.findCredentials().
+ *
+ * As a cross-platform fallback we also accept the presence of the
+ * `~/.claude/sessions/` directory together with `~/.claude/settings.json`,
+ * which is enough to assume the SDK can resolve credentials on its own.
+ */
+async function detectClaudeCodeOauth(): Promise<boolean> {
+  if (await fileExists(claudeCredentialsPath())) return true;
+
+  if (process.platform === "darwin") {
+    const hasKeychainEntry = await new Promise<boolean>((resolve) => {
+      const proc = spawn(
+        "/usr/bin/security",
+        ["find-generic-password", "-s", "Claude Code-credentials"],
+        { stdio: "ignore" }
+      );
+      proc.on("error", () => resolve(false));
+      proc.on("exit", (code) => resolve(code === 0));
+    });
+    if (hasKeychainEntry) return true;
+  }
+
+  const claudeHome = claudeHomeDir();
+  const hasSettings = await fileExists(path.join(claudeHome, "settings.json"));
+  const hasSessions = await fileExists(path.join(claudeHome, "sessions"));
+  return hasSettings && hasSessions;
+}
+
 export function createAuthBridge(): AuthBridge {
   const status = async (): Promise<AuthStatus> => {
     const keytar = await loadKeytar();
-    const hasOauthCredentials = await fileExists(claudeCredentialsPath());
+    const hasOauthCredentials = await detectClaudeCodeOauth();
     const storedKey = keytar
       ? await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT).catch(() => null)
       : null;
