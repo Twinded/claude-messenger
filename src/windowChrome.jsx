@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-const api = window.codexMsn;
+const api = window.claudeMsn;
 
 export const brandPeopleLogo = new URL("./icons/codex-messenger-people.png", window.location.href).href;
 
