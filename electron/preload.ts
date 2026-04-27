@@ -103,6 +103,12 @@ const claudeMsn = {
   // Models
   listModels: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),
 
+  // MCP servers
+  listMcpServers: () => ipcRenderer.invoke(IPC_CHANNELS.mcpList),
+  saveMcpServer: (payload: { name: string; config: unknown }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.mcpSave, payload),
+  removeMcpServer: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.mcpRemove, name),
+
   // Approvals
   respondApproval: (payload: PermissionResponsePayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.approvalRespond, payload),

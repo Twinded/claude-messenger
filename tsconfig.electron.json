@@ -22,6 +22,8 @@
     "electron/ipcHandlers.ts",
     "electron/main.ts",
     "electron/mcpConfigLoader.ts",
+    "electron/mcpConfigWriter.ts",
+    "electron/notifications.ts",
     "electron/security.ts",
     "electron/settingsStore.ts",
     "electron/skillsWatcher.ts",

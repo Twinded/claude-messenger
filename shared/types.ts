@@ -226,6 +226,10 @@ export const IPC_CHANNELS = {
 
   modelsList: "models:list",
 
+  mcpList: "mcp:list",
+  mcpSave: "mcp:save",
+  mcpRemove: "mcp:remove",
+
   approvalRespond: "approval:respond",
 
   mediaPickFile: "media:pick-file",

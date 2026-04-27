@@ -19,6 +19,7 @@ import { createAgentsWatcher } from "./agentsWatcher.js";
 import { createSkillsWatcher } from "./skillsWatcher.js";
 import { createContactRegistry, type CustomAgentRecord } from "./contactRegistry.js";
 import { createClaudeAgentClient } from "./claudeAgentClient.js";
+import { createNotificationsService } from "./notifications.js";
 import {
   createBaseWindowFactory,
   setStableWindowTitle,
@@ -89,6 +90,20 @@ async function saveCustomAgents(agents: CustomAgentRecord[]): Promise<void> {
 async function bootstrap(): Promise<void> {
   await app.whenReady();
 
+  // Auto-grant media (microphone + camera) permissions to our own renderer
+  // so MediaRecorder / getUserMedia work without an OS prompt every launch.
+  // The renderer is sandboxed and only runs our own code, so this is the
+  // correct trust level here.
+  const { session } = await import("electron");
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    // "media" covers both microphone and camera in Electron's renderer.
+    if (permission === "media") {
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
   const settings = createSettingsStore({ filePath: settingsFilePath });
   const { settings: currentSettings } = await settings.load();
 
@@ -124,10 +139,67 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  const notifications = createNotificationsService({
+    windows,
+    isDev,
+    onTrayQuit: () => undefined,
+    onTrayShow: () => undefined,
+    logDebug
+  });
+
+  let unreadByContact = new Map<string, number>();
+  function recomputeUnread(): void {
+    let total = 0;
+    for (const value of unreadByContact.values()) total += value;
+    notifications.setUnreadCount(total);
+  }
+
   claudeClient.on("stream", (event) => {
     const channel = streamChannelFor(event.kind);
     for (const win of windows.values()) {
       if (!win.isDestroyed()) win.webContents.send(channel, event);
+    }
+
+    if (event.kind === "message-completed" && event.message?.role === "assistant") {
+      const previewSegments = (event.message.content || [])
+        .filter((block) => block.type === "text")
+        .map((block) => (block as { text: string }).text);
+      const preview = previewSegments.join(" ").slice(0, 200);
+      const thread = threadStore.getThread(event.threadId);
+      const contact = thread
+        ? contactRegistry.list().find((c) => c.id === thread.contactId)
+        : null;
+      notifications.notifyAssistantMessage({
+        contactName: contact?.displayName ?? "Claude",
+        preview: preview || "Nouveau message"
+      });
+      if (contact) {
+        unreadByContact.set(contact.id, (unreadByContact.get(contact.id) ?? 0) + 1);
+        recomputeUnread();
+      }
+    }
+
+    if (event.kind === "permission-request") {
+      const thread = threadStore.getThread(event.threadId);
+      const contact = thread
+        ? contactRegistry.list().find((c) => c.id === thread.contactId)
+        : null;
+      notifications.notifyPermissionRequest({
+        contactName: contact?.displayName ?? "Claude",
+        toolName: event.toolName
+      });
+    }
+  });
+
+  // Reset unread when a window with a contactId regains focus.
+  app.on("browser-window-focus", (_event, win) => {
+    const url = win.webContents.getURL();
+    const match = url.match(/contactId=([^&]+)/);
+    if (!match) return;
+    const contactId = decodeURIComponent(match[1] ?? "");
+    if (contactId) {
+      unreadByContact.delete(contactId);
+      recomputeUnread();
     }
   });
 

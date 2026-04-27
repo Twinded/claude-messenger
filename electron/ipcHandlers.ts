@@ -33,7 +33,8 @@ import type { ClaudeAgentClient } from "./claudeAgentClient.js";
 import type { ContactRegistry, CustomAgentRecord } from "./contactRegistry.js";
 import type { SettingsStore } from "./settingsStore.js";
 import type { ThreadStore } from "./threadStore.js";
-import { SUPPORTED_MODELS } from "../shared/claudeOptions.js";
+import { SUPPORTED_MODELS, type McpServerConfig } from "../shared/claudeOptions.js";
+import { listUserMcpServers, removeUserMcpServer, saveUserMcpServer } from "./mcpConfigWriter.js";
 
 interface RegisterIpcHandlersOptions {
   settings: SettingsStore;
@@ -275,6 +276,34 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
   safeHandle<void, { id: string }[]>(
     IPC_CHANNELS.modelsList,
     async () => SUPPORTED_MODELS.map((id) => ({ id })),
+    logDebug
+  );
+
+  // ── MCP servers ──────────────────────────────────────────────────────
+  safeHandle<void, Record<string, McpServerConfig>>(
+    IPC_CHANNELS.mcpList,
+    async () => listUserMcpServers(),
+    logDebug
+  );
+
+  safeHandle<{ name: string; config: McpServerConfig }, { ok: true }>(
+    IPC_CHANNELS.mcpSave,
+    async (_event, payload) => {
+      if (!payload?.name) throw new Error("name is required");
+      if (!payload.config?.type) throw new Error("config.type is required");
+      await saveUserMcpServer(payload.name, payload.config);
+      return { ok: true };
+    },
+    logDebug
+  );
+
+  safeHandle<string, { ok: true }>(
+    IPC_CHANNELS.mcpRemove,
+    async (_event, name) => {
+      if (typeof name !== "string" || !name) throw new Error("name is required");
+      await removeUserMcpServer(name);
+      return { ok: true };
+    },
     logDebug
   );
 

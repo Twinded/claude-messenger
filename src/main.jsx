@@ -17,6 +17,9 @@ import "./styles.css";
 import "./styles-claude-messenger.css";
 
 import { ClaudeConfigurationDialog } from "./claudeConfigurationDialog.jsx";
+import { McpServersDialog } from "./mcpServersDialog.jsx";
+import { CameraDialog } from "./cameraDialog.jsx";
+import { createVoiceRecorder } from "./voiceRecorder.js";
 import { ApprovalRequestsPanel, Message as MsnMessage } from "./chatParts.jsx";
 import { extractWinkFromText } from "./winks.js";
 import { animatedInlineEmoticons, renderFormattedMessageText } from "./messageFormatting.jsx";
@@ -144,6 +147,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [agentCreatorOpen, setAgentCreatorOpen] = useState(false);
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
 
   useEffect(() => {
     void api.bootstrap().then(setBootstrapResult);
@@ -197,8 +201,12 @@ function App() {
         onOpenSettings={() => setShowSettings(true)}
         onOpenProfileEditor={() => setProfileEditorOpen(true)}
         onOpenAgentCreator={() => setAgentCreatorOpen(true)}
+        onOpenMcpDialog={() => setMcpDialogOpen(true)}
         refreshBootstrap={async () => setBootstrapResult(await api.bootstrap())}
       />
+      {mcpDialogOpen ? (
+        <McpServersDialog onClose={() => setMcpDialogOpen(false)} />
+      ) : null}
       {profileEditorOpen ? (
         <ProfileEditor
           settings={bootstrapResult.settings}
@@ -222,7 +230,7 @@ function App() {
 
 // ── Main shell (roster) ───────────────────────────────────────────────
 
-function MainShell({ bootstrap, onOpenSettings, onOpenProfileEditor, onOpenAgentCreator, refreshBootstrap }) {
+function MainShell({ bootstrap, onOpenSettings, onOpenProfileEditor, onOpenAgentCreator, onOpenMcpDialog, refreshBootstrap }) {
   const [search, setSearch] = useState("");
   const [contacts, setContacts] = useState(bootstrap.contacts);
   const updates = useUpdates({ api, appVersion: bootstrap.appVersion, initialCheck: true });
@@ -285,6 +293,9 @@ function MainShell({ bootstrap, onOpenSettings, onOpenProfileEditor, onOpenAgent
           </button>
           <button type="button" onClick={onOpenAgentCreator} className="top-update-button">
             ＋ Agent
+          </button>
+          <button type="button" onClick={onOpenMcpDialog} className="top-update-button">
+            🔌 MCP
           </button>
           <button type="button" onClick={onOpenSettings} className="top-update-button">
             ⚙ Réglages
@@ -383,8 +394,13 @@ function ChatWindow({ contact, standalone = false }) {
   const [attachments, setAttachments] = useState([]);
   const [threads, setThreads] = useState([]);
   const [activeGame, setActiveGame] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [voiceInterim, setVoiceInterim] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
   const transcriptRef = useRef(null);
   const composerRef = useRef(null);
+  const voiceRef = useRef(null);
+  if (!voiceRef.current) voiceRef.current = createVoiceRecorder();
 
   const { state } = useClaudeEvents(thread?.id ?? null);
 
@@ -574,6 +590,54 @@ function ChatWindow({ contact, standalone = false }) {
     await api.sendMessage({ contactId: contact.id, threadId: thread.id, text: prompt });
   }, [contact.id, thread]);
 
+  const handleToggleVoice = useCallback(async () => {
+    const recorder = voiceRef.current;
+    if (!recorder) return;
+    if (recorder.isRecording()) {
+      const result = await recorder.stop();
+      setRecording(false);
+      setVoiceInterim("");
+      const transcribed = (result.transcript || "").trim();
+      if (transcribed) {
+        setDraft((current) => (current ? `${current} ${transcribed}` : transcribed));
+      }
+      // Always offer the audio blob as an attachment in case the user
+      // wants Claude to see the file alongside the transcript.
+      if (result.dataUrl) {
+        setAttachments((current) => [...current, {
+          path: `voice-${Date.now()}.webm`,
+          name: `voice-${new Date().toISOString().slice(11, 19)}.webm`,
+          dataUrl: result.dataUrl,
+          kind: "audio"
+        }]);
+      }
+      composerRef.current?.focus();
+    } else {
+      try {
+        await recorder.start({
+          onTranscript: ({ final, interim }) => {
+            setVoiceInterim(interim);
+            if (final) setDraft(final);
+          }
+        });
+        setRecording(true);
+      } catch (error) {
+        // eslint-disable-next-line no-alert
+        window.alert(`Microphone indisponible : ${error?.message || error}`);
+      }
+    }
+  }, []);
+
+  const handleCameraCapture = useCallback((dataUrl) => {
+    if (!dataUrl) return;
+    setAttachments((current) => [...current, {
+      path: `camera-${Date.now()}.png`,
+      name: `camera-${new Date().toISOString().slice(11, 19)}.png`,
+      dataUrl,
+      kind: "image"
+    }]);
+  }, []);
+
   const showApprovals = pendingApprovals.length > 0;
 
   return (
@@ -709,6 +773,17 @@ function ChatWindow({ contact, standalone = false }) {
               <button type="button" onClick={handlePickFile} title="Joindre un fichier">
                 📎
               </button>
+              <button
+                type="button"
+                onClick={handleToggleVoice}
+                title={recording ? "Stopper l'enregistrement" : "Enregistrer un message vocal"}
+                style={recording ? { background: "#d9534f", color: "white" } : undefined}
+              >
+                {recording ? "⏹ Voix" : "🎤"}
+              </button>
+              <button type="button" onClick={() => setCameraOpen(true)} title="Capture caméra">
+                📷
+              </button>
               <button type="button" onClick={handleWizz} title="Wizz / Nudge">
                 ⚡ Wizz
               </button>
@@ -755,14 +830,52 @@ function ChatWindow({ contact, standalone = false }) {
         </aside>
       </section>
 
+      {cameraOpen ? (
+        <CameraDialog
+          onCapture={handleCameraCapture}
+          onClose={() => setCameraOpen(false)}
+        />
+      ) : null}
+
+      {recording && voiceInterim ? (
+        <div className="voice-interim">🎤 « {voiceInterim} »</div>
+      ) : null}
+
       <ResizeGrip />
     </main>
   );
 }
 
-/** Horizontal strip of thread tabs over the transcript. */
+/**
+ * Horizontal strip of thread tabs over the transcript.
+ *
+ * Up to VISIBLE_TAB_LIMIT tabs are shown inline; the rest collapse into
+ * a "▼" overflow menu that mirrors the upstream MSN hidden-threads UX.
+ * The active thread is always pinned to the visible row regardless of
+ * its position in the list.
+ */
+const VISIBLE_TAB_LIMIT = 6;
+
 function ThreadTabStrip({ threads, activeThreadId, contactName, onSwitch, onNew, onDelete, onReorder }) {
   const [dragId, setDragId] = useState(null);
+  const [hiddenMenuOpen, setHiddenMenuOpen] = useState(false);
+  const hiddenMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!hiddenMenuOpen) return undefined;
+    function close(event) {
+      if (!hiddenMenuRef.current?.contains(event.target)) setHiddenMenuOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setHiddenMenuOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [hiddenMenuOpen]);
 
   if (threads.length <= 1) {
     return (
@@ -771,6 +884,17 @@ function ThreadTabStrip({ threads, activeThreadId, contactName, onSwitch, onNew,
         <button type="button" onClick={onNew} title="Nouveau fil">＋ Nouveau fil</button>
       </div>
     );
+  }
+
+  // Pin the active thread inside the visible window.
+  const visible = threads.slice(0, VISIBLE_TAB_LIMIT);
+  const hidden = threads.slice(VISIBLE_TAB_LIMIT);
+  if (activeThreadId && !visible.some((t) => t.id === activeThreadId)) {
+    const activeIndex = threads.findIndex((t) => t.id === activeThreadId);
+    if (activeIndex >= 0) {
+      visible[VISIBLE_TAB_LIMIT - 1] = threads[activeIndex];
+      hidden.splice(activeIndex - VISIBLE_TAB_LIMIT, 1);
+    }
   }
 
   function handleDrop(targetId) {
@@ -786,11 +910,16 @@ function ThreadTabStrip({ threads, activeThreadId, contactName, onSwitch, onNew,
     setDragId(null);
   }
 
+  function handleHiddenChoice(thread) {
+    setHiddenMenuOpen(false);
+    onSwitch(thread.id);
+  }
+
   return (
     <div className="thread-tab-bar">
       <span className="thread-to-label">À : {contactName}</span>
       <div className="thread-tab-strip">
-        {threads.map((thread) => {
+        {visible.map((thread) => {
           const title = thread.title || thread.lastMessagePreview?.slice(0, 24) || "Conversation";
           return (
             <div
@@ -819,6 +948,35 @@ function ThreadTabStrip({ threads, activeThreadId, contactName, onSwitch, onNew,
             </div>
           );
         })}
+
+        {hidden.length > 0 ? (
+          <div className="thread-tab-hidden-wrapper" ref={hiddenMenuRef}>
+            <button
+              type="button"
+              className={`thread-tab-hidden-toggle ${hiddenMenuOpen ? "open" : ""}`}
+              onClick={() => setHiddenMenuOpen((open) => !open)}
+              title={`${hidden.length} autre(s) fil(s)`}
+            >
+              ▼ {hidden.length}
+            </button>
+            {hiddenMenuOpen ? (
+              <div className="thread-tab-hidden-menu">
+                {hidden.map((thread) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    onClick={() => handleHiddenChoice(thread)}
+                    className="thread-tab-hidden-entry"
+                  >
+                    <strong>{thread.title || thread.lastMessagePreview?.slice(0, 32) || "Conversation"}</strong>
+                    <small>{thread.updatedAt ? new Date(thread.updatedAt).toLocaleString("fr-FR") : ""}</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <button type="button" className="thread-tab-add" onClick={onNew} title="Nouveau fil">＋</button>
       </div>
     </div>
