@@ -58,10 +58,119 @@
 }
 
 /* Status dots placeholders for the contact-line.avatar */
+/*
+ * Roster contact line — overrides upstream's 4-column grid (16px caret /
+ * 28px avatar / fr / auto) for our simpler 3-element layout (avatar /
+ * name / unread). Without this, the avatar lands in the caret column and
+ * the name is squeezed into the 28px avatar column, which produces the
+ * stacked / overlapping text seen in narrow windows.
+ */
+.contact-line {
+  grid-template-columns: 28px minmax(0, 1fr) auto !important;
+  padding-left: 8px !important;
+}
+
+.contact-line .contact-mini-avatar {
+  position: relative;
+}
+
+.contact-line .contact-mini-avatar .avatar {
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: linear-gradient(135deg, #cfe1fb 0%, #4f8df3 100%);
+  border-radius: 4px;
+  position: relative;
+}
+
+.contact-line .contact-mini-avatar .avatar::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid white;
+  border-radius: 50%;
+  background: #999;
+}
+
 .contact-mini-avatar .avatar.status-online::after { background: #2bb673; }
 .contact-mini-avatar .avatar.status-busy::after { background: #d9534f; }
 .contact-mini-avatar .avatar.status-away::after { background: #f0ad4e; }
+.contact-mini-avatar .avatar.status-offline::after { background: #888; }
 .contact-mini-avatar .avatar.status-streaming::after { background: #4f8df3; }
+
+.contact-line .contact-line-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.contact-line .contact-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contact-line .contact-mood {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #61738b;
+  margin-left: 0;
+}
+
+/*
+ * Toolbar — upstream uses `overflow: hidden` because it expects exactly
+ * the four legacy MSN tools. Our toolbar carries a dynamic set of action
+ * buttons, so we let it scroll horizontally when narrow and switch to
+ * icon-only buttons with tooltips below 360px.
+ */
+.toolbar {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  flex-wrap: nowrap;
+  padding: 5px 6px !important;
+  min-height: 36px !important;
+}
+
+.toolbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.toolbar::-webkit-scrollbar-thumb {
+  background: rgba(25, 69, 126, 0.25);
+  border-radius: 2px;
+}
+
+.toolbar > .top-update-button {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #f7faff 0%, #d8e6fa 100%);
+  border: 1px solid #a9c2e3;
+  color: #19457e;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar > .top-update-button:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #cfe1fb 100%);
+}
+
+.toolbar > .toolbar-brand {
+  flex-shrink: 0;
+  margin-left: 0 !important;
+  margin-right: 8px !important;
+  padding: 0 !important;
+  font-size: 13px !important;
+  font-style: normal !important;
+}
 
 /* Standalone chat window — fills 100% (no roster on the side). */
 .msn-window.chat.standalone {

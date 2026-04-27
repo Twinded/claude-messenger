@@ -249,10 +249,10 @@ async function createMainWindow(
   createBaseWindow: ReturnType<typeof createBaseWindowFactory>
 ): Promise<BrowserWindow> {
   const win = createBaseWindow("main", {
-    width: 320,
-    height: 600,
-    minWidth: 280,
-    minHeight: 420,
+    width: 360,
+    height: 640,
+    minWidth: 320,
+    minHeight: 460,
     title: "Claude Messenger"
   });
   setStableWindowTitle(win, "Claude Messenger");
