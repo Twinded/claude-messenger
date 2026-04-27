@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Messenger</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        background: #dbeeff;
+      }
+
+      .file-mode-help {
+        max-width: 720px;
+        margin: 48px auto;
+        padding: 24px;
+        color: #10223f;
+        background: #ffffff;
+        border: 1px solid #8cb4df;
+        box-shadow: 0 8px 24px rgba(16, 34, 63, 0.16);
+      }
+
+      .file-mode-help h1 {
+        margin: 0 0 12px;
+        font-size: 28px;
+      }
+
+      .file-mode-help p {
+        margin: 0 0 14px;
+        font-size: 16px;
+      }
+
+      .file-mode-help code {
+        display: inline-block;
+        padding: 3px 6px;
+        color: #000;
+        background: #eef5ff;
+        border: 1px solid #b7cbe4;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="file-mode-help">
+        <h1>Codex Messenger must be launched over HTTP</h1>
+        <p>This file is the Vite entry point. Do not open it directly with <code>file://</code>.</p>
+        <p>From PowerShell, run <code>npm run dev</code>, then open the displayed URL.</p>
+        <p>For the desktop app, run <code>npm run electron:start</code>.</p>
+      </div>
+    </div>
+    <script type="module">
+      const isBuiltRenderer = window.location.pathname.includes("/dist/");
+      if (window.location.protocol !== "file:" || isBuiltRenderer) {
+        import("/src/main.jsx");
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,56 @@
+codex-messenger upstream attribution
+=====================================
+
+This project (claude-messenger) is an independent reimplementation of
+codex-messenger (https://github.com/anisayari/codex-messenger), authored
+by Anis AYARI and released under the MIT License.
+
+The following assets and source files in this repository are reused from
+the upstream codex-messenger source tree under the terms of its MIT
+license (see ./LICENSE in this directory):
+
+  public/audio/                   MSN Messenger 7 sound pack
+  public/icons/                   Application and contact icons
+  public/msn-assets/              MSN 7.5.0322 extracted assets,
+                                  emoticons, winks, dynamic backgrounds,
+                                  and integrity manifests
+  public/screenshots/             Demo screenshots (interface previews)
+
+  src/chatParts.jsx               MSN-style chat surface components
+  src/chatTextStyle.js            Text styling helpers
+  src/composer.jsx                Message composer
+  src/gamesPanel.jsx              Embedded games panel
+  src/i18n.js                     UI translations (FR/EN/ES/JP)
+  src/main.jsx                    Renderer entry point
+  src/mediaPanels.jsx             Media side panels (camera, voice, etc.)
+  src/messageFormatting.jsx       Message rendering and formatting
+  src/msnDisplayPictures.js       Generated avatars
+  src/msnEmoticons.js             MSN emoticon strip rendering
+  src/rosterUtils.js              Contact list grouping and ordering
+  src/rosterView.jsx              Roster (contact list) component
+  src/soundEffects.js             Sound playback helpers
+  src/styles.css                  Windows XP / MSN 7 stylesheet
+  src/threadTabs.jsx              MSN-style thread tabs
+  src/updateDialog.jsx            Update dialog
+  src/usePromptDialog.jsx         Prompt dialog hook
+  src/useUnreadState.js           Unread tracking
+  src/useUpdates.js               Update checker hook
+  src/versionLabel.js             Version label utilities
+  src/windowChrome.jsx            XP window chrome
+  src/winks.js                    Wink (animated GIF) helpers
+
+  shared/languages.js             Language definitions for i18n
+  shared/threadSelection.js       Thread selection helpers (pure logic)
+  shared/versionUtils.js          Version comparison utilities
+
+  index.html                      Vite renderer entry HTML
+  vite.config.js                  Vite configuration
+
+Some of these files contain references to "Codex" or upstream-specific
+behavior; they are progressively adapted to Claude in subsequent commits.
+The MIT license requires preservation of the copyright notice and
+permission notice; the original LICENSE is preserved alongside this NOTICE
+in vendor/codex-messenger/LICENSE.
+
+This NOTICE is informative only; it does not extend the upstream license,
+and any further modifications fall under the project's top-level LICENSE.
