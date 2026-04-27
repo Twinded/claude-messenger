@@ -173,9 +173,16 @@ async function bootstrap(): Promise<void> {
         contactName: contact?.displayName ?? "Claude",
         preview: preview || "Nouveau message"
       });
-      if (contact) {
+      if (contact && thread) {
+        // Persist the unread bump on the thread row so the roster bubble
+        // survives a restart, and broadcast a refresh to any open roster.
+        threadStore.bumpUnread(event.threadId, preview.slice(0, 80) || "Nouveau message");
         unreadByContact.set(contact.id, (unreadByContact.get(contact.id) ?? 0) + 1);
         recomputeUnread();
+        void contactRegistry.refresh();
+        for (const win of windows.values()) {
+          if (!win.isDestroyed()) win.webContents.send("conversation:notify", { kind: "contacts" });
+        }
       }
     }
 
@@ -199,7 +206,12 @@ async function bootstrap(): Promise<void> {
     const contactId = decodeURIComponent(match[1] ?? "");
     if (contactId) {
       unreadByContact.delete(contactId);
+      threadStore.markRead(contactId);
       recomputeUnread();
+      void contactRegistry.refresh();
+      for (const w of windows.values()) {
+        if (!w.isDestroyed()) w.webContents.send("conversation:notify", { kind: "contacts" });
+      }
     }
   });
 

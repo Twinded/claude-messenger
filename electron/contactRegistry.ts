@@ -166,11 +166,22 @@ export function createContactRegistry(options: ContactRegistryOptions): ContactR
     const customs = customAgents.map(customToContact);
 
     const base = [main, ...subagents, ...customs, ...skills];
-    if (options.isDemoMode?.()) {
-      contacts = applyOverrides([...DEMO_CONTACTS, ...base]);
-    } else {
-      contacts = applyOverrides(base);
+    const merged = options.isDemoMode?.() ? [...DEMO_CONTACTS, ...base] : base;
+
+    // Project per-contact unread counts from the thread store onto the
+    // contact list so the roster bubble reflects real activity.
+    const recent = options.threadStore.listAllThreads(500);
+    const unreadByContact = new Map<string, number>();
+    for (const thread of recent) {
+      const current = unreadByContact.get(thread.contactId) ?? 0;
+      unreadByContact.set(thread.contactId, current + (thread.unread ?? 0));
     }
+    const withUnread = merged.map((contact) => ({
+      ...contact,
+      unread: unreadByContact.get(contact.id) ?? 0
+    }));
+
+    contacts = applyOverrides(withUnread);
     emitter.emit("change", contacts);
   };
 

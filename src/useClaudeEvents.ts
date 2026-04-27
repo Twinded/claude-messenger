@@ -107,7 +107,8 @@ function reduce(state: ClaudeEventState, event: StreamEvent): ClaudeEventState {
       return {
         ...state,
         isStreaming: true,
-        streamingText: state.streamingText + event.text
+        streamingText: state.streamingText + event.text,
+        thinkingText: ""
       };
     case "thinking":
       return {

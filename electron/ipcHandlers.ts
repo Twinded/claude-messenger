@@ -446,9 +446,13 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
 
   safeHandle<string, { ok: true }>(
     IPC_CHANNELS.conversationWizz,
-    async (_event, contactId) => {
+    async (event, contactId) => {
+      // Broadcast to every other window — the sender already plays the
+      // outgoing wizz sound locally, no need to re-shake their own UI.
       for (const win of windows.values()) {
-        if (!win.isDestroyed()) win.webContents.send("window:wizz", { contactId });
+        if (win.isDestroyed()) continue;
+        if (win.webContents === event.sender) continue;
+        win.webContents.send("window:wizz", { contactId });
       }
       return { ok: true };
     },

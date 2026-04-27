@@ -20,7 +20,7 @@ export function ApprovalRequestsPanel({ requests, onRespond }) {
           <section className={`approval-card ${request.riskLevel || "unknown"}`} key={request.approvalId}>
             <div className="approval-head">
               <strong>{request.title}</strong>
-              <span>{request.riskLevel ? `risk: ${request.riskLevel}` : "limited access"}</span>
+              <span>{request.riskLevel ? `risque : ${request.riskLevel}` : "accès limité"}</span>
             </div>
             {request.reason ? <p className="approval-reason">{request.reason}</p> : null}
             {request.kind === "command" ? (
@@ -37,15 +37,15 @@ export function ApprovalRequestsPanel({ requests, onRespond }) {
             <div className="approval-meta">
               {request.cwd ? <span>{request.cwd}</span> : null}
               {request.riskDescription ? <span>{request.riskDescription}</span> : null}
-              {request.grantRoot ? <span>grant root: {request.grantRoot}</span> : null}
+              {request.grantRoot ? <span>racine accordée : {request.grantRoot}</span> : null}
             </div>
             {request.error ? <p className="approval-error">{request.error}</p> : null}
             <div className="approval-actions">
-              <button type="button" disabled={disabled} onClick={() => onRespond(request, "approved")}>Allow</button>
+              <button type="button" disabled={disabled} onClick={() => onRespond(request, "approved")}>Autoriser</button>
               {request.canApproveForSession ? (
-                <button type="button" disabled={disabled} onClick={() => onRespond(request, "approved_for_session")}>Allow session</button>
+                <button type="button" disabled={disabled} onClick={() => onRespond(request, "approved_for_session")}>Autoriser pour la session</button>
               ) : null}
-              <button type="button" disabled={disabled} className="deny" onClick={() => onRespond(request, "denied")}>Disallow</button>
+              <button type="button" disabled={disabled} className="deny" onClick={() => onRespond(request, "denied")}>Refuser</button>
             </div>
           </section>
         );

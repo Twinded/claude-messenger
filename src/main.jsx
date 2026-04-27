@@ -157,7 +157,10 @@ function App() {
     return (
       <main className="msn-window">
         <Titlebar title="Claude Messenger" />
-        <div className="boot-screen">Connexion à Claude…</div>
+        <div className="boot-screen">
+          <div className="boot-spinner" aria-hidden="true" />
+          <span>Connexion à Claude…</span>
+        </div>
       </main>
     );
   }
@@ -329,6 +332,13 @@ function MainShell({ bootstrap, onOpenSettings, onOpenProfileEditor, onOpenAgent
         </div>
 
         <div className="groups">
+          {grouped.length === 0 ? (
+            <p className="system" style={{ padding: "12px", textAlign: "center", color: "#6b7d96" }}>
+              {search.trim()
+                ? "Aucun contact ne correspond à cette recherche."
+                : "Aucun contact pour le moment. Crée un agent via ＋ Agent."}
+            </p>
+          ) : null}
           {grouped.map(([group, items]) => (
             <RosterGroup
               key={group}
@@ -400,7 +410,9 @@ function ChatWindow({ contact, standalone = false }) {
   const transcriptRef = useRef(null);
   const composerRef = useRef(null);
   const voiceRef = useRef(null);
-  if (!voiceRef.current) voiceRef.current = createVoiceRecorder();
+  useEffect(() => {
+    if (!voiceRef.current) voiceRef.current = createVoiceRecorder();
+  }, []);
 
   const { state } = useClaudeEvents(thread?.id ?? null);
 
@@ -641,7 +653,7 @@ function ChatWindow({ contact, standalone = false }) {
   const showApprovals = pendingApprovals.length > 0;
 
   return (
-    <main className={`msn-window chat${standalone ? " standalone" : ""}`} key={contact.id}>
+    <main className={`msn-window chat${standalone ? " standalone" : ""}`} key={contact.id} style={{ position: "relative" }}>
       <Titlebar title={`${contact.displayName} — Conversation`} />
 
       <div className="toolbar-shell">
@@ -697,14 +709,28 @@ function ChatWindow({ contact, standalone = false }) {
                   <strong>{contact.displayName}</strong>
                   <time>{nowTime()}</time>
                 </header>
-                <div className="message-content">{state.streamingText}</div>
+                <div className="message-content">
+                  {renderFormattedMessageText(state.streamingText)}
+                </div>
               </article>
             ) : null}
             {state.error ? (
               <p className="system error">⚠ {state.error}</p>
             ) : null}
-            {winkAnimation ? (
-              <div className="wink-animation-card">{winkAnimation.wink}</div>
+            {winkAnimation?.wink ? (
+              <div className="wink-animation-overlay">
+                <div className="wink-animation-card">
+                  {winkAnimation.wink.src ? (
+                    <img
+                      src={winkAnimation.wink.src}
+                      alt={winkAnimation.wink.label ?? ""}
+                      draggable="false"
+                    />
+                  ) : (
+                    <span>{winkAnimation.wink.label ?? "wink"}</span>
+                  )}
+                </div>
+              </div>
             ) : null}
           </div>
 
@@ -718,8 +744,8 @@ function ChatWindow({ contact, standalone = false }) {
                     onClick={() => handleInsertEmoticon(emoticon.code)}
                     title={emoticon.code}
                   >
-                    {emoticon.url ? (
-                      <img src={emoticon.url} alt={emoticon.code} draggable="false" />
+                    {emoticon.src ? (
+                      <img src={emoticon.src} alt={emoticon.code} draggable="false" />
                     ) : (
                       <span>{emoticon.code}</span>
                     )}
@@ -811,9 +837,11 @@ function ChatWindow({ contact, standalone = false }) {
             <div className="msn-service-panel">
               <strong className="msn-service-title">Tokens</strong>
               <div className="msn-service-body">
-                in {state.lastUsage.inputTokens} · out {state.lastUsage.outputTokens}
+                Entrée : {state.lastUsage.inputTokens.toLocaleString("fr-FR")}
+                {" · "}
+                Sortie : {state.lastUsage.outputTokens.toLocaleString("fr-FR")}
                 {state.lastUsage.cacheReadInputTokens ? (
-                  <> · cache {state.lastUsage.cacheReadInputTokens}</>
+                  <> · Cache : {state.lastUsage.cacheReadInputTokens.toLocaleString("fr-FR")}</>
                 ) : null}
               </div>
             </div>
