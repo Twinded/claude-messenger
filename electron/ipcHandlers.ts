@@ -179,7 +179,15 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
       if (!partial || typeof partial !== "object") {
         throw new Error("settings payload must be an object");
       }
-      return settings.patch(partial);
+      const updated = await settings.patch(partial);
+      // demoMode toggle should refresh the contact roster live.
+      if ("demoMode" in partial) {
+        await contactRegistry.refresh();
+        for (const win of windows.values()) {
+          if (!win.isDestroyed()) win.webContents.send("conversation:notify", { kind: "contacts" });
+        }
+      }
+      return updated;
     },
     logDebug
   );
@@ -293,14 +301,24 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
     logDebug
   );
 
-  safeHandle<{ contactId: string; threadId?: string }, { thread: ThreadSummary; messages: Message[] }>(
+  safeHandle<{ contactId: string; threadId?: string; createNew?: boolean }, { thread: ThreadSummary; messages: Message[] }>(
     IPC_CHANNELS.conversationLoadThread,
     async (_event, payload) => {
       const contact = contactRegistry.list().find((c) => c.id === payload.contactId);
       if (!contact) throw new Error(`Unknown contact: ${payload.contactId}`);
-      const threadId = payload.threadId ?? `thread:${randomUUID()}`;
-      const existing = threadStore.getThread(threadId);
       const now = new Date().toISOString();
+      let threadId: string;
+
+      if (payload.threadId) {
+        threadId = payload.threadId;
+      } else if (payload.createNew) {
+        threadId = `thread:${randomUUID()}`;
+      } else {
+        const existing = threadStore.listThreadsForContact(contact.id, 1);
+        threadId = existing[0]?.id ?? `thread:${randomUUID()}`;
+      }
+
+      const existing = threadStore.getThread(threadId);
       if (!existing) {
         threadStore.upsertThread({
           id: threadId,
@@ -642,13 +660,37 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): void {
     logDebug
   );
 
+  // Reorder threads — approximates a custom order by bumping updated_at
+  // incrementally so the default DESC sort matches the requested order.
+  safeHandle<{ contactId: string; threadIds: string[] }, { ok: true }>(
+    IPC_CHANNELS.conversationReorderThreads,
+    async (_event, payload) => {
+      const ts = Date.now();
+      payload.threadIds.forEach((id, index) => {
+        const existing = threadStore.getThread(id);
+        if (!existing) return;
+        threadStore.upsertThread({
+          id,
+          contactId: existing.contactId,
+          sessionId: existing.sessionId,
+          title: existing.title,
+          createdAt: existing.createdAt,
+          updatedAt: new Date(ts - index).toISOString(),
+          lastMessagePreview: existing.lastMessagePreview,
+          unread: existing.unread
+        });
+      });
+      return { ok: true };
+    },
+    logDebug
+  );
+
   // ── Channels still pending real implementation ────────────────────────
   const stubbedChannels: readonly string[] = [
     IPC_CHANNELS.conversationOpenThread,
     IPC_CHANNELS.conversationOpenProject,
     IPC_CHANNELS.conversationSwitchThread,
     IPC_CHANNELS.conversationLoadPreviousMessages,
-    IPC_CHANNELS.conversationReorderThreads,
     IPC_CHANNELS.conversationCompact,
     IPC_CHANNELS.conversationFork
   ];

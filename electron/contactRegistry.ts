@@ -39,7 +39,42 @@ export interface ContactRegistryOptions {
   threadStore: ThreadStore;
   loadCustomAgents: () => Promise<CustomAgentRecord[]>;
   defaultModel: string;
+  isDemoMode?: () => boolean;
 }
+
+const DEMO_CONTACTS: Contact[] = [
+  {
+    id: "demo:claude",
+    kind: "main-agent",
+    displayName: "Demo Claude",
+    group: "Démo",
+    iconKey: "main-agent",
+    status: "online",
+    statusMessage: "Mode démo — pas de vrai appel API",
+    model: "claude-sonnet-4-6",
+    unread: 0
+  },
+  {
+    id: "demo:reviewer",
+    kind: "subagent",
+    displayName: "Demo Reviewer",
+    group: "Démo",
+    iconKey: "subagent",
+    status: "busy",
+    statusMessage: "Lit ton diff…",
+    unread: 1
+  },
+  {
+    id: "demo:designer",
+    kind: "subagent",
+    displayName: "Demo Designer",
+    group: "Démo",
+    iconKey: "subagent",
+    status: "away",
+    statusMessage: "En réunion",
+    unread: 0
+  }
+];
 
 export interface ContactRegistry extends EventEmitter {
   refresh(): Promise<void>;
@@ -121,7 +156,7 @@ export function createContactRegistry(options: ContactRegistryOptions): ContactR
       group: "Claude",
       iconKey: "main-agent",
       status: "online",
-      statusMessage: "Ready to help",
+      statusMessage: "Prêt à t'aider",
       model: options.defaultModel,
       unread: 0
     };
@@ -130,7 +165,12 @@ export function createContactRegistry(options: ContactRegistryOptions): ContactR
     const skills = options.skillsWatcher.list().map(skillToContact);
     const customs = customAgents.map(customToContact);
 
-    contacts = applyOverrides([main, ...subagents, ...customs, ...skills]);
+    const base = [main, ...subagents, ...customs, ...skills];
+    if (options.isDemoMode?.()) {
+      contacts = applyOverrides([...DEMO_CONTACTS, ...base]);
+    } else {
+      contacts = applyOverrides(base);
+    }
     emitter.emit("change", contacts);
   };
 

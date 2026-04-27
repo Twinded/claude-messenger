@@ -109,7 +109,8 @@ async function bootstrap(): Promise<void> {
     skillsWatcher,
     threadStore,
     loadCustomAgents,
-    defaultModel: currentSettings.defaultModel
+    defaultModel: currentSettings.defaultModel,
+    isDemoMode: () => Boolean(settings.current()?.demoMode)
   });
   await contactRegistry.refresh();
 

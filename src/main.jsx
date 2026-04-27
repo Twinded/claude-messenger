@@ -21,6 +21,7 @@ import { ApprovalRequestsPanel, Message as MsnMessage } from "./chatParts.jsx";
 import { extractWinkFromText } from "./winks.js";
 import { animatedInlineEmoticons, renderFormattedMessageText } from "./messageFormatting.jsx";
 import msnEmoticons from "./msnEmoticons.js";
+import GamesPanel from "./gamesPanel.jsx";
 import {
   playNewMessage,
   playSoundKey,
@@ -380,19 +381,34 @@ function ChatWindow({ contact, standalone = false }) {
   const [emoticonOpen, setEmoticonOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [attachments, setAttachments] = useState([]);
+  const [threads, setThreads] = useState([]);
+  const [activeGame, setActiveGame] = useState(null);
   const transcriptRef = useRef(null);
   const composerRef = useRef(null);
 
   const { state } = useClaudeEvents(thread?.id ?? null);
 
+  // Load threads list for this contact + most recent thread
+  const reloadThreads = useCallback(async () => {
+    const list = await api.listConversations({ contactId: contact.id, limit: 30 });
+    setThreads(Array.isArray(list) ? list : []);
+  }, [contact.id]);
+
   useEffect(() => {
     setThread(null);
     setHistoricalMessages([]);
+    void reloadThreads();
     void api.loadThread({ contactId: contact.id }).then((result) => {
       setThread(result.thread);
       setHistoricalMessages(result.messages || []);
     });
-  }, [contact.id]);
+  }, [contact.id, reloadThreads]);
+
+  // Refresh thread list when a turn ends (preview / unread updates)
+  useEffect(() => {
+    if (!state.sessionId) return;
+    void reloadThreads();
+  }, [state.sessionId, reloadThreads]);
 
   // Listen for permission requests
   useEffect(() => {
@@ -522,6 +538,42 @@ function ChatWindow({ contact, standalone = false }) {
     }]);
   }, []);
 
+  const handleNewThread = useCallback(async () => {
+    const result = await api.loadThread({ contactId: contact.id, createNew: true });
+    setThread(result.thread);
+    setHistoricalMessages([]);
+    void reloadThreads();
+  }, [contact.id, reloadThreads]);
+
+  const handleSwitchThread = useCallback(async (threadId) => {
+    if (!threadId || threadId === thread?.id) return;
+    const result = await api.loadThread({ contactId: contact.id, threadId });
+    setThread(result.thread);
+    setHistoricalMessages(result.messages || []);
+  }, [contact.id, thread?.id]);
+
+  const handleDeleteThread = useCallback(async (threadId) => {
+    await api.deleteThread(threadId);
+    if (threadId === thread?.id) {
+      setThread(null);
+      setHistoricalMessages([]);
+      const refreshed = await api.loadThread({ contactId: contact.id });
+      setThread(refreshed.thread);
+      setHistoricalMessages(refreshed.messages || []);
+    }
+    void reloadThreads();
+  }, [contact.id, reloadThreads, thread?.id]);
+
+  const handleReorderThreads = useCallback(async (orderedIds) => {
+    await api.reorderThreads({ contactId: contact.id, threadIds: orderedIds });
+    void reloadThreads();
+  }, [contact.id, reloadThreads]);
+
+  const handleRunGame = useCallback(async (prompt) => {
+    if (!thread || !prompt) return;
+    await api.sendMessage({ contactId: contact.id, threadId: thread.id, text: prompt });
+  }, [contact.id, thread]);
+
   const showApprovals = pendingApprovals.length > 0;
 
   return (
@@ -540,7 +592,15 @@ function ChatWindow({ contact, standalone = false }) {
 
       <section className="chat-body">
         <div className="chat-main">
-          <div className="to-line">À : {contact.displayName}</div>
+          <ThreadTabStrip
+            threads={threads}
+            activeThreadId={thread?.id}
+            contactName={contact.displayName}
+            onSwitch={handleSwitchThread}
+            onNew={handleNewThread}
+            onDelete={handleDeleteThread}
+            onReorder={handleReorderThreads}
+          />
 
           {showApprovals ? (
             <ApprovalRequestsPanel
@@ -684,8 +744,13 @@ function ChatWindow({ contact, standalone = false }) {
             </div>
           ) : null}
           <div className="msn-service-panel">
-            <strong className="msn-service-title">Threads récents</strong>
-            <ThreadList contactId={contact.id} activeThreadId={thread?.id} />
+            <strong className="msn-service-title">Jeux MSN</strong>
+            <GamesPanel
+              activeGame={activeGame}
+              onSelectGame={setActiveGame}
+              onRun={handleRunGame}
+              waiting={state.isStreaming}
+            />
           </div>
         </aside>
       </section>
@@ -695,33 +760,68 @@ function ChatWindow({ contact, standalone = false }) {
   );
 }
 
-function ThreadList({ contactId, activeThreadId }) {
-  const [threads, setThreads] = useState([]);
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .listConversations({ contactId, limit: 12 })
-      .then((result) => {
-        if (cancelled) return;
-        setThreads(Array.isArray(result) ? result : []);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [contactId, activeThreadId]);
+/** Horizontal strip of thread tabs over the transcript. */
+function ThreadTabStrip({ threads, activeThreadId, contactName, onSwitch, onNew, onDelete, onReorder }) {
+  const [dragId, setDragId] = useState(null);
 
-  if (!threads.length) {
-    return <div className="msn-service-body">Aucun thread précédent.</div>;
+  if (threads.length <= 1) {
+    return (
+      <div className="thread-tab-bar">
+        <span className="thread-to-label">À : {contactName}</span>
+        <button type="button" onClick={onNew} title="Nouveau fil">＋ Nouveau fil</button>
+      </div>
+    );
   }
+
+  function handleDrop(targetId) {
+    if (!dragId || dragId === targetId) return;
+    const ids = threads.map((t) => t.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...ids];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onReorder(next);
+    setDragId(null);
+  }
+
   return (
-    <ul className="thread-list">
-      {threads.map((thread) => (
-        <li key={thread.id} className={thread.id === activeThreadId ? "active" : ""}>
-          <strong>{thread.title || "Conversation"}</strong>
-          <small>{thread.lastMessagePreview || "—"}</small>
-        </li>
-      ))}
-    </ul>
+    <div className="thread-tab-bar">
+      <span className="thread-to-label">À : {contactName}</span>
+      <div className="thread-tab-strip">
+        {threads.map((thread) => {
+          const title = thread.title || thread.lastMessagePreview?.slice(0, 24) || "Conversation";
+          return (
+            <div
+              key={thread.id}
+              className={`thread-tab ${thread.id === activeThreadId ? "active" : ""}`}
+              draggable
+              onDragStart={() => setDragId(thread.id)}
+              onDragEnd={() => setDragId(null)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => handleDrop(thread.id)}
+              onClick={() => onSwitch(thread.id)}
+              title={thread.lastMessagePreview || ""}
+            >
+              <span>{title}</span>
+              <button
+                type="button"
+                className="thread-tab-close"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (window.confirm("Supprimer ce fil ?")) onDelete(thread.id);
+                }}
+                aria-label="Supprimer le fil"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+        <button type="button" className="thread-tab-add" onClick={onNew} title="Nouveau fil">＋</button>
+      </div>
+    </div>
   );
 }
 

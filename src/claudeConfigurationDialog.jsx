@@ -16,10 +16,17 @@ const SUPPORTED_MODELS = [
 ];
 
 const PERMISSION_MODES = [
-  { id: "default", label: "Default — ask for risky tools" },
-  { id: "acceptEdits", label: "Accept file edits automatically" },
-  { id: "plan", label: "Plan mode — read-only" },
-  { id: "bypassPermissions", label: "Bypass all permissions (advanced)" }
+  { id: "default", label: "Par défaut — demander pour les outils risqués" },
+  { id: "acceptEdits", label: "Accepter les éditions de fichiers" },
+  { id: "plan", label: "Mode plan (lecture seule)" },
+  { id: "bypassPermissions", label: "Aucune permission (avancé)" }
+];
+
+const LANGUAGE_OPTIONS = [
+  { id: "fr", label: "Français" },
+  { id: "en", label: "English" },
+  { id: "es", label: "Español" },
+  { id: "ja", label: "日本語" }
 ];
 
 export function ClaudeConfigurationDialog({ onClose }) {
@@ -178,6 +185,64 @@ export function ClaudeConfigurationDialog({ onClose }) {
             </option>
           ))}
         </select>
+      </section>
+
+      <section>
+        <h3>Langue de l'interface</h3>
+        <select
+          value={settings.language ?? "fr"}
+          onChange={(event) => patchSettings({ language: event.target.value })}
+          disabled={busy}
+        >
+          {LANGUAGE_OPTIONS.map((lang) => (
+            <option key={lang.id} value={lang.id}>
+              {lang.label}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      <section>
+        <h3>Limites de génération</h3>
+        <label className="msn-login-field">
+          <span>Tokens de sortie max</span>
+          <input
+            type="number"
+            min={256}
+            max={64000}
+            value={settings.maxOutputTokens}
+            onChange={(event) =>
+              patchSettings({ maxOutputTokens: Number(event.target.value) || 8192 })
+            }
+            disabled={busy}
+          />
+        </label>
+        <label className="msn-login-field">
+          <span>Tokens de réflexion max (thinking)</span>
+          <input
+            type="number"
+            min={0}
+            max={64000}
+            value={settings.maxThinkingTokens}
+            onChange={(event) =>
+              patchSettings({ maxThinkingTokens: Number(event.target.value) || 0 })
+            }
+            disabled={busy}
+          />
+        </label>
+      </section>
+
+      <section>
+        <h3>Mode démo</h3>
+        <label className="msn-login-field" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(settings.demoMode)}
+            onChange={(event) => patchSettings({ demoMode: event.target.checked })}
+            disabled={busy}
+          />
+          <span>Afficher trois contacts de démo isolés (utile pour les screenshots et la présentation).</span>
+        </label>
       </section>
 
       {error && <p className="error">{error}</p>}

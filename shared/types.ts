@@ -116,6 +116,7 @@ export interface AppSettings {
   apiKeyStored: boolean;
   profilePicturePath?: string;
   profileStatusMessage?: string;
+  demoMode: boolean;
   windowZoomFactor: number;
 }
 

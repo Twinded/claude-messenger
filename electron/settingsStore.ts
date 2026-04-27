@@ -25,6 +25,7 @@ const settingsSchema = z.object({
   apiKeyStored: z.boolean().default(false),
   profilePicturePath: z.string().optional(),
   profileStatusMessage: z.string().optional(),
+  demoMode: z.boolean().default(false),
   windowZoomFactor: z.number().positive().max(3).default(1)
 });
 
